@@ -6,6 +6,11 @@ import org.slf4j.LoggerFactory;
 import dev.sam.common.auth.Argon2Params;
 import dev.sam.common.auth.Argon2id;
 import dev.sam.common.identity.Wordlist;
+import dev.sam.common.net.IngressPolicy;
+import dev.sam.common.net.IngressPolicy.Transport;
+import dev.sam.common.net.gate.IngressGate;
+import dev.sam.common.net.gate.IngressRoutes;
+import io.netty.channel.ChannelPipeline;
 import net.fabricmc.api.DedicatedServerModInitializer;
 import net.fabricmc.loader.api.FabricLoader;
 
@@ -14,6 +19,16 @@ public final class SamServer implements DedicatedServerModInitializer {
 
     public static final String MOD_ID = "sam-server";
     public static final Logger LOGGER = LoggerFactory.getLogger("SAM");
+
+    // Configuración fija hasta el ciclo de carga del .env (RF-CFG): TCP sí, WebSocket no.
+    private static final IngressPolicy INGRESS_POLICY = new IngressPolicy(true, false);
+    static final String KICK_MESSAGE = "Este servidor requiere SAM Client para entrar. [SAM-K001]";
+
+    /** Lo llama el mixin de ServerConnectionListener al armar cada conexión TCP aceptada. */
+    public static void installIngressGate(ChannelPipeline pipeline) {
+        // TLS y WebSocket todavía no existen: esas conexiones se cierran (fallan cerrado)
+        IngressGate.install(pipeline, INGRESS_POLICY, Transport.DIRECT_TCP, IngressRoutes.closing(), KICK_MESSAGE);
+    }
 
     @Override
     public void onInitializeServer() {

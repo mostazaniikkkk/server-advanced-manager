@@ -289,15 +289,17 @@ class IngressGateHandlerTest {
         final Capture capture = new Capture();
 
         @Override
-        public void installSamTls(ChannelHandlerContext gate) {
+        public boolean installSamTls(ChannelHandlerContext gate) {
             calls.add("tls");
             gate.pipeline().addAfter(gate.name(), "sam_tls", capture);
+            return true;
         }
 
         @Override
-        public void installWebSocket(ChannelHandlerContext gate) {
+        public boolean installWebSocket(ChannelHandlerContext gate) {
             calls.add("websocket");
             gate.pipeline().addAfter(gate.name(), "sam_ws", capture);
+            return true;
         }
     }
 }

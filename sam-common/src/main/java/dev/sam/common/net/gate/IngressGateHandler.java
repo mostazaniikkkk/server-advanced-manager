@@ -43,18 +43,9 @@ public final class IngressGateHandler extends ByteToMessageDecoder {
             case WAIT -> {
                 // faltan bytes: ByteToMessageDecoder los sigue acumulando
             }
-            case CLOSE -> {
-                in.skipBytes(in.readableBytes());
-                ctx.close();
-            }
-            case SAM_TLS -> {
-                routes.installSamTls(ctx);
-                ctx.pipeline().remove(this);
-            }
-            case WEBSOCKET_HANDSHAKE -> {
-                routes.installWebSocket(ctx);
-                ctx.pipeline().remove(this);
-            }
+            case CLOSE -> close(ctx, in);
+            case SAM_TLS -> leaveOrClose(ctx, in, routes.installSamTls(ctx));
+            case WEBSOCKET_HANDSHAKE -> leaveOrClose(ctx, in, routes.installWebSocket(ctx));
             case VANILLA_RESTRICTED -> {
                 // El ping legacy (anterior a 1.7) no tiene handshake: lo atiende Minecraft directamente
                 if (classification != Classification.LEGACY_PING) {
@@ -63,5 +54,20 @@ public final class IngressGateHandler extends ByteToMessageDecoder {
                 ctx.pipeline().remove(this);
             }
         }
+    }
+
+    /** Si la ruta se instaló, se quita reenviándole los bytes; si no, descarta y cierra. */
+    private void leaveOrClose(ChannelHandlerContext ctx, ByteBuf in, boolean installed) {
+        if (installed) {
+            ctx.pipeline().remove(this);
+        } else {
+            close(ctx, in);
+        }
+    }
+
+    /** Descarta lo acumulado antes de cerrar: si no, al desarmarse el pipeline llegaría a Minecraft. */
+    private static void close(ChannelHandlerContext ctx, ByteBuf in) {
+        in.skipBytes(in.readableBytes());
+        ctx.close();
     }
 }

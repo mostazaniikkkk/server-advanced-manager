@@ -29,6 +29,34 @@ tasks.withType<JavaCompile>().configureEach {
     options.release = 21
 }
 
+// ===== Pruebas de punta a punta contra el servidor QA en ejecución (solo a pedido) =====
+// Un cliente de prueba habla el protocolo de Minecraft por un socket real. No forma parte de `check`.
+val qaTestSourceSet = sourceSets.create("qaTest")
+
+dependencies {
+    "qaTestImplementation"(project(":sam-common"))
+    "qaTestImplementation"(libs.netty.buffer)
+    "qaTestImplementation"(libs.netty.codec)
+    "qaTestImplementation"(platform(libs.junit.bom))
+    "qaTestImplementation"(libs.junit.jupiter)
+    "qaTestImplementation"(libs.assertj)
+    "qaTestRuntimeOnly"(libs.junit.launcher)
+}
+
+tasks.register<Test>("qaTest") {
+    description = "Pruebas de punta a punta contra el servidor QA en ejecución (127.0.0.1:samQaPort)."
+    group = "sam"
+    testClassesDirs = qaTestSourceSet.output.classesDirs
+    classpath = qaTestSourceSet.runtimeClasspath
+    useJUnitPlatform()
+    systemProperty("sam.qa.port", (findProperty("samQaPort") as String?) ?: "25567")
+    outputs.upToDateWhen { false }
+    testLogging {
+        events("passed", "failed")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
+}
+
 // ===== Instalación en el servidor QA local (solo a pedido: nunca la dispara un build) =====
 // La ruta es propia de cada máquina: va en local.properties (fuera del repositorio) o con -PsamQaServerDir=...
 val localProperties = Properties().apply {
