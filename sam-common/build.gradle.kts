@@ -18,6 +18,8 @@ dependencies {
     compileOnly(libs.netty.codec)
     compileOnly(libs.netty.transport)
     compileOnly(libs.netty.buffer)
+    compileOnly(libs.netty.handler)
+    testImplementation(libs.netty.handler)
     testImplementation(libs.netty.codec)
     testImplementation(libs.netty.transport)
     testImplementation(libs.netty.buffer)

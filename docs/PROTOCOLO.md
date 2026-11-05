@@ -697,8 +697,9 @@ Formato del mensaje al jugador: texto traducible + código entre corchetes (por 
 
 ## 12. Validaciones de la fase 0
 
-1. Soporte de certificados **Ed25519** en TLS 1.3 con JSSE de JDK 21 en cliente y servidor (si no, P-256).
-2. Disponibilidad del ***TLS exporter*** (JSSE vs. BouncyCastle JSSE) para fijar la variante de la sección 7.
+1. ✅ **Resuelto (ciclo 14):** la JSSE de la JDK completa handshakes TLS 1.3 con certificado **Ed25519**, ALPN `sam/1` y las suites del perfil (`SamTlsTest`). No hace falta el respaldo P-256.
+   - Hallazgo: la JSSE solo aplica ALPN si el cliente ofrece la extensión. Un cliente TLS cualquiera **sin** ALPN completa el handshake, así que el servidor agrega un `AlpnGuard` que cierra la conexión si al terminar el handshake no se negoció `sam/1`. Cuando el cliente ofrece otros protocolos, la JSSE aborta sola.
+2. ✅ **Resuelto:** el código se compila con `release 21`, y la JSSE de Java 21 no expone una API pública de *TLS exporter*. La sección 7 usa la variante **hash del certificado del servidor + nonce**: no depende de la versión de la JDK y es suficiente porque el pinning ya autentica al servidor.
 3. Puntos de inserción del `SslHandler` en `Connection` y `ServerConnectionListener` de 1.21.1, y convivencia con la compresión y el cifrado vanilla (este último no se activa: el servidor es offline).
 4. Que la `ConfigurationTask` de Fabric retenga al cliente 300 s sin que lo desconecte el keep-alive.
 5. Costo real de Argon2id con P-06 en una PC modesta (objetivo ≤ 1 s en el cliente) y en el servidor bajo carga.
