@@ -22,6 +22,11 @@ import dev.sam.common.net.IngressPolicy.Transport;
 import dev.sam.common.net.gate.IngressGate;
 import dev.sam.common.net.gate.IngressGateHandler;
 import dev.sam.common.net.gate.SamRoutes;
+import dev.sam.common.net.ip.ClientIp;
+import dev.sam.common.net.ip.RealIpHeader;
+import dev.sam.common.net.ip.RealIpResolver;
+import dev.sam.common.net.ip.RealIpTest;
+import dev.sam.common.net.ip.TrustedProxies;
 import dev.sam.common.net.tls.SamTls;
 import dev.sam.common.net.tls.ServerCertificateObserver;
 import io.netty.buffer.ByteBuf;
@@ -406,6 +411,26 @@ class WebSocketRouteTest {
             .doesNotContain(WebSocketUpgrade.INNER_GATE_NAME);
     }
 
+    // ===== IP real (RS-WS-02) =====
+
+    @Test
+    void detrasDeUnProxyDeConfianzaLaConexionTomaLaIpDeLaCabecera() {
+        var audit = new RealIpTest.Auditoria();
+        var servidor = servidorDesde(RealIpTest.ip("162.158.10.20"), audit);
+        assertThat(enviarHttp(servidor, peticion("CF-Connecting-IP: 203.0.113.7"))).startsWith("HTTP/1.1 101 ");
+        assertThat(ClientIp.of(servidor)).contains(RealIpTest.ip("203.0.113.7"));
+        assertThat(audit.eventos).isEmpty();
+    }
+
+    @Test
+    void unaIpFalsificadaSeIgnoraYSeAuditaAunqueLaPeticionSeaRechazada() {
+        var audit = new RealIpTest.Auditoria();
+        var servidor = servidorDesde(RealIpTest.ip("198.51.100.9"), audit);
+        assertThat(enviarHttp(servidor, peticionEn("/otra", "CF-Connecting-IP: 203.0.113.7"))).startsWith("HTTP/1.1 404 ");
+        assertThat(ClientIp.of(servidor)).contains(RealIpTest.ip("198.51.100.9"));
+        assertThat(audit.eventos).singleElement().asString().contains("198.51.100.9");
+    }
+
     // ===== Ayudantes =====
 
     private static final class Capture extends ChannelInboundHandlerAdapter {
@@ -421,6 +446,15 @@ class WebSocketRouteTest {
         var servidor = new EmbeddedChannel();
         IngressGate.install(servidor.pipeline(), new IngressPolicy(true, true), Transport.DIRECT_TCP,
             new SamRoutes(identidad, Optional.of(RUTA)), "kick vanilla");
+        servidor.pipeline().addLast("minecraft", new Capture());
+        return servidor;
+    }
+
+    private static EmbeddedChannel servidorDesde(java.net.InetAddress ip, RealIpTest.Auditoria audit) {
+        var servidor = RealIpTest.canalDesde(ip);
+        var realIp = new RealIpResolver(TrustedProxies.parse("cloudflare"), RealIpHeader.CF_CONNECTING_IP, audit);
+        IngressGate.install(servidor.pipeline(), new IngressPolicy(true, true), Transport.DIRECT_TCP,
+            new SamRoutes(identidad, Optional.of(RUTA), realIp), "kick vanilla");
         servidor.pipeline().addLast("minecraft", new Capture());
         return servidor;
     }

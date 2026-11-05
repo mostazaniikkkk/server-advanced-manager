@@ -11,6 +11,8 @@ import org.junit.jupiter.api.Test;
 import dev.sam.common.net.IngressPolicy.Action;
 import dev.sam.common.net.IngressPolicy.Transport;
 import dev.sam.common.net.ProtocolDetector.Classification;
+import dev.sam.common.net.ip.RealIpHeader;
+import dev.sam.common.net.ip.RealIpTest;
 
 /**
  * Transporte desde la configuración (REQUERIMIENTOS.md 8.3, RF-WS-01/02/03): por defecto solo TCP;
@@ -86,5 +88,60 @@ class TransportConfigTest {
     void ambosApagadosSeRechaza() {
         assertThatThrownBy(() -> TransportConfig.from(Map.of(TransportConfig.TCP_ENABLED, "false")))
             .isInstanceOf(IllegalArgumentException.class).hasMessageContaining(TransportConfig.TCP_ENABLED);
+    }
+
+    // ===== IP real (RS-WS-02) =====
+
+    private static final java.util.Map<String, String> WS = Map.of(TransportConfig.WS_ENABLED, "true", TransportConfig.WS_PATH, "/juego-ws");
+
+    private static java.util.Map<String, String> conWs(String... pares) {
+        var valores = new java.util.HashMap<>(WS);
+        for (int i = 0; i < pares.length; i += 2) {
+            valores.put(pares[i], pares[i + 1]);
+        }
+        return valores;
+    }
+
+    @Test
+    void porDefectoConfiaEnCloudflareYUsaCfConnectingIp() {
+        var config = TransportConfig.from(WS);
+        assertThat(config.trustedProxies().contains(RealIpTest.ip("162.158.10.20"))).isTrue();
+        assertThat(config.trustedProxies().contains(RealIpTest.ip("10.0.0.5"))).isFalse();
+        assertThat(config.realIpHeader()).isEqualTo(RealIpHeader.CF_CONNECTING_IP);
+    }
+
+    @Test
+    void losProxiesYLaCabeceraSeConfiguran() {
+        var config = TransportConfig.from(conWs(TransportConfig.TRUSTED_PROXIES, "10.0.0.0/8",
+            TransportConfig.REAL_IP_HEADER, "X-Forwarded-For"));
+        assertThat(config.trustedProxies().contains(RealIpTest.ip("10.0.0.5"))).isTrue();
+        assertThat(config.trustedProxies().contains(RealIpTest.ip("162.158.10.20"))).isFalse();
+        assertThat(config.realIpHeader()).isEqualTo(RealIpHeader.X_FORWARDED_FOR);
+        var vacio = TransportConfig.from(conWs(TransportConfig.TRUSTED_PROXIES, ""));
+        assertThat(vacio.trustedProxies().contains(RealIpTest.ip("162.158.10.20"))).as("vacío: ninguno").isFalse();
+    }
+
+    @Test
+    void proxiesOCabeceraInvalidosSeRechazanNombrandoLaClave() {
+        assertThatThrownBy(() -> TransportConfig.from(conWs(TransportConfig.TRUSTED_PROXIES, "10.0.0.0/33")))
+            .isInstanceOf(IllegalArgumentException.class).hasMessageContaining(TransportConfig.TRUSTED_PROXIES);
+        assertThatThrownBy(() -> TransportConfig.from(conWs(TransportConfig.REAL_IP_HEADER, "X-Real-IP")))
+            .isInstanceOf(IllegalArgumentException.class).hasMessageContaining(TransportConfig.REAL_IP_HEADER);
+    }
+
+    @Test
+    void elResolverDeIpUsaLaConfiguracionYLaAuditoria() {
+        var audit = new RealIpTest.Auditoria();
+        var realIp = TransportConfig.from(WS).realIp(audit);
+        var cabeceras = new io.netty.handler.codec.http.DefaultHttpHeaders().add("CF-Connecting-IP", "203.0.113.7");
+        assertThat(realIp.resolve(RealIpTest.ip("162.158.10.20"), cabeceras)).isEqualTo(RealIpTest.ip("203.0.113.7"));
+        assertThat(realIp.resolve(RealIpTest.ip("198.51.100.9"), cabeceras)).isEqualTo(RealIpTest.ip("198.51.100.9"));
+        assertThat(audit.eventos).hasSize(1);
+    }
+
+    @Test
+    void sinWebSocketLosProxiesNoSeUsan() {
+        var config = TransportConfig.from(Map.of(TransportConfig.TRUSTED_PROXIES, "10.0.0.0/33"));
+        assertThat(config.trustedProxies().contains(RealIpTest.ip("162.158.10.20"))).isFalse();
     }
 }

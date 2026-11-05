@@ -13,6 +13,7 @@ import dev.sam.common.net.IngressPolicy;
 import dev.sam.common.net.IngressPolicy.Transport;
 import dev.sam.common.net.gate.IngressGateHandler;
 import dev.sam.common.net.gate.IngressRoutes;
+import dev.sam.common.net.ip.RealIpResolver;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
@@ -84,9 +85,9 @@ public final class WebSocketUpgrade {
     }
 
     /** Instala el handshake detrás de la compuerta {@code gate}. */
-    public static void install(ChannelHandlerContext gate, String path, IngressRoutes routes) {
+    public static void install(ChannelHandlerContext gate, String path, IngressRoutes routes, RealIpResolver realIp) {
         var pipeline = gate.pipeline();
-        pipeline.addAfter(gate.name(), UPGRADE_NAME, new UpgradeHandler(path, routes));
+        pipeline.addAfter(gate.name(), UPGRADE_NAME, new UpgradeHandler(path, routes, realIp));
         pipeline.addAfter(gate.name(), HTTP_NAME, new HttpServerCodec(MAX_REQUEST_BYTES, MAX_REQUEST_BYTES, MAX_REQUEST_BYTES));
         pipeline.addAfter(gate.name(), LIMIT_NAME, new RequestByteLimit());
     }
@@ -162,13 +163,15 @@ public final class WebSocketUpgrade {
     static final class UpgradeHandler extends ChannelInboundHandlerAdapter {
         private final String path;
         private final IngressRoutes routes;
+        private final RealIpResolver realIp;
         private String acceptedKey;
         private boolean rejected;
         private ScheduledFuture<?> timeout;
 
-        UpgradeHandler(String path, IngressRoutes routes) {
+        UpgradeHandler(String path, IngressRoutes routes, RealIpResolver realIp) {
             this.path = path;
             this.routes = routes;
+            this.realIp = realIp;
         }
 
         @Override
@@ -194,6 +197,8 @@ public final class WebSocketUpgrade {
                     return;
                 }
                 if (msg instanceof HttpRequest request) {
+                    // Antes de validar: el intento de falsificar la IP se audita aunque se rechace
+                    realIp.apply(ctx.channel(), request.headers());
                     var status = check(request, path);
                     if (status != null) {
                         reject(ctx, status);

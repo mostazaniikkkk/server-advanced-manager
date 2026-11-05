@@ -3,29 +3,38 @@ package dev.sam.common.config;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
 
 import dev.sam.common.net.IngressPolicy;
+import dev.sam.common.net.ip.IngressAudit;
+import dev.sam.common.net.ip.RealIpHeader;
+import dev.sam.common.net.ip.RealIpResolver;
+import dev.sam.common.net.ip.TrustedProxies;
 import dev.sam.common.net.ws.WebSocketUpgrade;
 
 /**
  * Transporte según la configuración (REQUERIMIENTOS.md 8.3, RF-WS-01/02/03). Por defecto solo TCP.
- * El WebSocket exige {@value #WS_PATH}. Un valor inválido no se interpreta: se rechaza con
+ * El WebSocket exige {@value #WS_PATH}; con él aplican {@value #TRUSTED_PROXIES} (por defecto
+ * Cloudflare) y {@value #REAL_IP_HEADER} (RS-WS-02). Un valor inválido no se interpreta: se rechaza con
  * {@link IllegalArgumentException} nombrando la clave (RF-CFG-04).
  *
  * @param webSocketPath la ruta, solo si el WebSocket está activo
  */
-public record TransportConfig(IngressPolicy policy, Optional<String> webSocketPath) {
+public record TransportConfig(IngressPolicy policy, Optional<String> webSocketPath, TrustedProxies trustedProxies,
+        RealIpHeader realIpHeader) {
 
     public static final String TCP_ENABLED = "SAM_TCP_ENABLED";
     public static final String WS_ENABLED = "SAM_WS_ENABLED";
     public static final String WS_PATH = "SAM_WS_PATH";
+    public static final String TRUSTED_PROXIES = "SAM_WS_TRUSTED_PROXIES";
+    public static final String REAL_IP_HEADER = "SAM_WS_REAL_IP_HEADER";
 
     public static TransportConfig from(Map<String, String> values) {
         var tcp = bool(values, TCP_ENABLED, true);
         var ws = bool(values, WS_ENABLED, false);
         // Ambos en false: lo rechaza IngressPolicy, nombrando las dos claves
         if (!ws) {
-            return new TransportConfig(new IngressPolicy(tcp, false), Optional.empty());
+            return new TransportConfig(new IngressPolicy(tcp, false), Optional.empty(), TrustedProxies.none(), RealIpHeader.CF_CONNECTING_IP);
         }
         var path = values.getOrDefault(WS_PATH, "").trim();
         try {
@@ -33,7 +42,22 @@ public record TransportConfig(IngressPolicy policy, Optional<String> webSocketPa
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException(WS_ENABLED + "=true exige un " + WS_PATH + " válido: " + e.getMessage(), e);
         }
-        return new TransportConfig(new IngressPolicy(tcp, true), Optional.of(path));
+        return new TransportConfig(new IngressPolicy(tcp, true), Optional.of(path),
+            parsed(values, TRUSTED_PROXIES, TrustedProxies.CLOUDFLARE, TrustedProxies::parse),
+            parsed(values, REAL_IP_HEADER, RealIpHeader.CF_CONNECTING_IP.headerName(), RealIpHeader::parse));
+    }
+
+    /** La IP del cliente según estos proxies y cabecera (RS-WS-02). */
+    public RealIpResolver realIp(IngressAudit audit) {
+        return new RealIpResolver(trustedProxies, realIpHeader, audit);
+    }
+
+    private static <T> T parsed(Map<String, String> values, String key, String byDefault, Function<String, T> parser) {
+        try {
+            return parser.apply(values.getOrDefault(key, byDefault));
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(key + ": " + e.getMessage(), e);
+        }
     }
 
     private static boolean bool(Map<String, String> values, String key, boolean byDefault) {

@@ -70,10 +70,14 @@ public final class SamServer implements DedicatedServerModInitializer {
         var outcome = ServerIdentityBootstrap.start(System.getenv(), file, new SecureRandom(), Instant.now());
         if (outcome instanceof Ready ready) {
             var identity = ready.identity();
-            ingress = new Ingress(transport.policy(), new SamRoutes(identity, transport.webSocketPath()));
+            // Hasta que exista la auditoría encadenada, los eventos de la entrada van al log
+            var realIp = transport.realIp(message -> LOGGER.warn("[auditoría] {}", message));
+            ingress = new Ingress(transport.policy(), new SamRoutes(identity, transport.webSocketPath(), realIp));
             LOGGER.info("Transporte: TCP directo {}, WebSocket {}",
                 transport.policy().decide(Transport.DIRECT_TCP, Classification.TLS) == Action.SAM_TLS ? "sí" : "no",
-                transport.webSocketPath().isPresent() ? "sí (ruta configurada)" : "no");
+                transport.webSocketPath().isPresent()
+                    ? "sí (ruta configurada, IP real por " + transport.realIpHeader().headerName() + ")"
+                    : "no");
             var fingerprint = ServerFingerprint.of(identity.publicKey().pin().toBytes());
             LOGGER.info("Identidad del servidor {}: server_id {}, huella «{}»",
                 ready.created() ? "generada" : "cargada", identity.serverId().hex(), fingerprint.phrase());

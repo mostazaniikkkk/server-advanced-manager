@@ -136,7 +136,7 @@ class TimeoutsTest {
 
             @Override
             public boolean installWebSocket(ChannelHandlerContext gate) {
-                WebSocketUpgrade.install(gate, "/ws", this);
+                WebSocketUpgrade.install(gate, "/ws", this, dev.sam.common.net.ip.RealIpResolver.direct());
                 return true;
             }
         });

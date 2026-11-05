@@ -83,7 +83,10 @@ tasks.jacocoTestCoverageVerification {
 pitest {
     pitestVersion = libs.versions.pitestCore.get()
     junit5PluginVersion = libs.versions.pitestJunit5.get()
-    targetClasses = listOf("dev.sam.*")
+    // -PpitTargets=a.B*,c.D* limita PIT a lo que tocó el ciclo (el 100 % se exige igual)
+    targetClasses = (findProperty("pitTargets") as String?)?.split(",")?.map { it.trim() } ?: listOf("dev.sam.*")
+    // Siempre todos los tests: si no, el plugin los filtra con el mismo patrón que las clases
+    targetTests = listOf("dev.sam.*")
     mutators = listOf("STRONGER")
     threads = 4
     outputFormats = listOf("HTML", "XML")

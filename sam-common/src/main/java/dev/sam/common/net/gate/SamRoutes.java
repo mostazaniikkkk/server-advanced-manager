@@ -3,6 +3,7 @@ package dev.sam.common.net.gate;
 import java.util.Optional;
 
 import dev.sam.common.identity.ServerIdentity;
+import dev.sam.common.net.ip.RealIpResolver;
 import dev.sam.common.net.tls.SamTls;
 import dev.sam.common.net.ws.WebSocketUpgrade;
 import io.netty.channel.ChannelHandlerContext;
@@ -23,14 +24,21 @@ public final class SamRoutes implements IngressRoutes {
 
     private final ServerIdentity identity;
     private final Optional<String> webSocketPath;
+    private final RealIpResolver realIp;
 
     /**
      * @param webSocketPath {@code SAM_WS_PATH}; vacío si el WebSocket no está configurado
      * @throws IllegalArgumentException si la ruta no es segura
      */
     public SamRoutes(ServerIdentity identity, Optional<String> webSocketPath) {
+        this(identity, webSocketPath, RealIpResolver.direct());
+    }
+
+    /** @param realIp de dónde sale la IP del cliente en el handshake WebSocket (RS-WS-02) */
+    public SamRoutes(ServerIdentity identity, Optional<String> webSocketPath, RealIpResolver realIp) {
         this.identity = identity;
         this.webSocketPath = webSocketPath.map(WebSocketUpgrade::validatePath);
+        this.realIp = realIp;
     }
 
     @Override
@@ -46,7 +54,7 @@ public final class SamRoutes implements IngressRoutes {
 
     @Override
     public boolean installWebSocket(ChannelHandlerContext gate) {
-        webSocketPath.ifPresent(path -> WebSocketUpgrade.install(gate, path, this));
+        webSocketPath.ifPresent(path -> WebSocketUpgrade.install(gate, path, this, realIp));
         return webSocketPath.isPresent();
     }
 }
