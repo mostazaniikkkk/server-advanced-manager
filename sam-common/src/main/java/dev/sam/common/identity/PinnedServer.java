@@ -6,18 +6,25 @@ import java.util.Objects;
 /**
  * Un servidor que el jugador decidió confiar (PROTOCOLO.md 3.3, entrada de {@code servers}).
  *
- * @param firstSeen cuándo se fijó por primera vez; se conserva aunque se reemplace el pin
+ * <p>Guarda la clave pública completa y no solo su hash, para poder verificar rotaciones
+ * firmadas por esa clave (PROTOCOLO.md 3.7).
+ *
+ * @param firstSeen cuándo se fijó por primera vez; se conserva aunque se reemplace la clave
  */
-public record PinnedServer(ServerId id, Pin pin, String name, Instant firstSeen) {
+public record PinnedServer(ServerId id, ServerPublicKey key, String name, Instant firstSeen) {
 
     public PinnedServer {
         Objects.requireNonNull(id, "id");
-        Objects.requireNonNull(pin, "pin");
+        Objects.requireNonNull(key, "key");
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(firstSeen, "firstSeen");
     }
 
-    PinnedServer withPin(Pin newPin) {
-        return new PinnedServer(id, newPin, name, firstSeen);
+    public Pin pin() {
+        return key.pin();
+    }
+
+    PinnedServer withKey(ServerPublicKey newKey) {
+        return new PinnedServer(id, newKey, name, firstSeen);
     }
 }

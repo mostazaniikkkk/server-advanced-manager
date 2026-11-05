@@ -2,6 +2,7 @@ package dev.sam.common.identity;
 
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -29,7 +30,14 @@ public final class PinStore {
         }
 
         /** Servidor nunca visto: requiere la pantalla de primera conexión (PROTOCOLO.md 3.4). */
-        record FirstContact(ServerId id, Pin pin) implements Verdict {
+        record FirstContact(ServerId id, ServerPublicKey key) implements Verdict {
+        }
+
+        /**
+         * La clave cambió con una cadena de rotación válida (PROTOCOLO.md 3.7): el llamador debe
+         * aplicar {@link #replaceKey} y continuar sin alertar al jugador.
+         */
+        record Rotated(PinnedServer previous, ServerPublicKey newKey, int chainLength) implements Verdict {
         }
 
         /** La dirección fijada presenta otro server_id. */
@@ -39,8 +47,8 @@ public final class PinStore {
             }
         }
 
-        /** Un server_id fijado se presenta con otra clave. */
-        record KeyChanged(PinnedServer pinned, Pin presented) implements Verdict {
+        /** Un server_id fijado se presenta con otra clave, sin rotación válida. */
+        record KeyChanged(PinnedServer pinned, ServerPublicKey presented) implements Verdict {
             public String code() {
                 return "SAM-C002";
             }
@@ -61,19 +69,30 @@ public final class PinStore {
         return EMPTY;
     }
 
-    public Verdict verify(String address, ServerId id, Pin pin) {
+    public Verdict verify(String address, ServerId id, ServerPublicKey key) {
+        return verify(address, id, key, List.of());
+    }
+
+    /**
+     * @param rotations declaraciones de rotación que envió el servidor en {@code sam:hello}
+     */
+    public Verdict verify(String address, ServerId id, ServerPublicKey key, List<RotationStatement> rotations) {
         var addressOwner = addresses.get(address);
         if (addressOwner != null && !addressOwner.equals(id)) {
             return new Verdict.IdentityMismatch(addressOwner, id);
         }
         var pinned = servers.get(id);
         if (pinned == null) {
-            return new Verdict.FirstContact(id, pin);
+            return new Verdict.FirstContact(id, key);
         }
-        if (!pinned.pin().equals(pin)) {
-            return new Verdict.KeyChanged(pinned, pin);
+        if (pinned.key().equals(key)) {
+            return new Verdict.Trusted(pinned, addressOwner == null);
         }
-        return new Verdict.Trusted(pinned, addressOwner == null);
+        return switch (RotationVerifier.resolve(pinned, key, rotations)) {
+            case RotationVerifier.Result.Rotated rotated ->
+                new Verdict.Rotated(pinned, rotated.newKey(), rotated.chainLength());
+            case RotationVerifier.Result.Rejected rejected -> new Verdict.KeyChanged(pinned, key);
+        };
     }
 
     /**
@@ -81,17 +100,17 @@ public final class PinStore {
      * solo registra la dirección y conserva el nombre y la fecha originales.
      *
      * @throws IllegalStateException si el server_id ya está fijado con otra clave (usar
-     *                               {@link #replacePin}) o la dirección pertenece a otro servidor
+     *                               {@link #replaceKey}) o la dirección pertenece a otro servidor
      */
-    public PinStore trust(String address, ServerId id, Pin pin, String name, Instant firstSeen) {
+    public PinStore trust(String address, ServerId id, ServerPublicKey key, String name, Instant firstSeen) {
         var pinned = servers.get(id);
-        if (pinned != null && !pinned.pin().equals(pin)) {
+        if (pinned != null && !pinned.key().equals(key)) {
             throw new IllegalStateException(
-                "El servidor " + id.hex() + " ya está fijado con otra clave: usar replacePin");
+                "El servidor " + id.hex() + " ya está fijado con otra clave: usar replaceKey");
         }
         requireAddressFreeOrOwnedBy(address, id);
         var newServers = new HashMap<>(servers);
-        newServers.putIfAbsent(id, new PinnedServer(id, pin, name, firstSeen));
+        newServers.putIfAbsent(id, new PinnedServer(id, key, name, firstSeen));
         var newAddresses = new HashMap<>(addresses);
         newAddresses.put(address, id);
         return new PinStore(newServers, newAddresses);
@@ -109,16 +128,16 @@ public final class PinStore {
     }
 
     /**
-     * Reemplaza la clave de un servidor fijado. Solo tras la confirmación fuerte del jugador
-     * (RS-NET-08) o una rotación firmada válida (PROTOCOLO.md 3.7).
+     * Reemplaza la clave de un servidor fijado. Solo tras una rotación válida
+     * ({@link Verdict.Rotated}) o la confirmación fuerte del jugador (RS-NET-08).
      */
-    public PinStore replacePin(ServerId id, Pin newPin) {
+    public PinStore replaceKey(ServerId id, ServerPublicKey newKey) {
         var pinned = servers.get(id);
         if (pinned == null) {
             throw new IllegalArgumentException("El servidor " + id.hex() + " no está fijado");
         }
         var newServers = new HashMap<>(servers);
-        newServers.put(id, pinned.withPin(newPin));
+        newServers.put(id, pinned.withKey(newKey));
         return new PinStore(newServers, addresses);
     }
 

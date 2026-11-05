@@ -222,21 +222,31 @@ Tras rotar, durante `SAM_ROTATION_GRACE` (por defecto 180 días), el servidor en
 ```
 RotationStatement {
   server_id      : bytes[16]
-  old_pin        : bytes[32]
-  new_pin        : bytes[32]
-  issued_at      : int64 (epoch s)
-  signature      : Ed25519 con la clave ANTERIOR sobre
-                   "SAM-rot-v1" ‖ server_id ‖ old_pin ‖ new_pin ‖ issued_at
+  old_pin        : bytes[32]          SHA-256 de la SPKI anterior
+  new_spki       : bytes[44]          SPKI Ed25519 completa de la clave nueva
+  issued_at      : int64 (epoch s, big-endian)
+  signature      : bytes[64]          Ed25519 con la clave ANTERIOR sobre
+                   "SAM-rot-v1" ‖ server_id ‖ old_pin ‖ new_spki ‖ issued_at
 }
 ```
 
-Como la declaración llega **después** del TLS (que el cliente aceptó provisoriamente para este caso), el cliente:
+> Corrección del ciclo 6 de TDD: la versión anterior llevaba `new_pin` (el hash) en lugar de `new_spki`. Con eso no se podía verificar una cadena A→B→C, porque la declaración B→C la firma B y el cliente solo habría tenido el hash de B, no su clave.
 
-1. Verifica que `old_pin` sea su pin actual y que la firma sea válida con esa clave (el cliente guarda la SPKI completa en `servers[id].spki`, no solo el hash).
-2. Verifica que `new_pin` sea el SPKI presentado en este TLS.
-3. Actualiza el pin y registra el cambio en su log local.
+Como la declaración llega **después** del TLS (que el cliente aceptó provisoriamente para este caso), el cliente (`RotationVerifier`):
 
-Si algo falla → SAM-C002. Se admiten cadenas de rotación (A→B→C) si el servidor envía todas las declaraciones.
+1. Parte de la clave fijada (el cliente guarda la SPKI completa, no solo el hash).
+2. Busca una declaración del mismo `server_id` cuyo `old_pin` sea el pin de la clave actual y verifica su firma con esa clave. Firma inválida → se rechaza todo.
+3. Avanza a `new_spki` y repite hasta llegar a la SPKI presentada en este TLS. Si no hay camino, hay un ciclo o llegan más de 4 declaraciones → se rechaza.
+4. Si llega, reemplaza la clave fijada y registra el cambio en su log local.
+
+Si algo falla → SAM-C002. Las declaraciones de otros `server_id` se ignoran.
+
+**Vectores** (librería `cryptography` de Python, independiente; claves de los tests 1, 2 y 3 de la RFC 8032 §7.1; `server_id` = `00…01`; fijados en `RotationVerifierTest`):
+
+| Rotación | issued_at | firma |
+|---|---|---|
+| K1 → K2 | 1793800000 | `b31a237a3262c30491bb6c2abba4de49bb1c7db822814e9f466ed721d117ff3835f42d54ba1f5c580894acf933fa1ce254997125c59a00461e60ae9b9fa9fc0d` |
+| K2 → K3 | 1793900000 | `e0ac1e9456590e2058cb51810691ff163e2c340b45d5ce8e000e9394ef169432c3859c3d844b8464723892844fbee62ec958a7796d4a4d7d94a17aaea94a1900` |
 
 ---
 

@@ -8,7 +8,7 @@ import java.util.HexFormat;
  * (minúsculas). Copia los bytes al construir y al devolverlos. Dos valores son iguales solo si
  * son del mismo tipo y tienen los mismos bytes.
  */
-abstract sealed class ByteValue permits ServerId, Pin {
+abstract sealed class ByteValue permits ServerId, Pin, ServerPublicKey {
 
     private final byte[] bytes;
 
