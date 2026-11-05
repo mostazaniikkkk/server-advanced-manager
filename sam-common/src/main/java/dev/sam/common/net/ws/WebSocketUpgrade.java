@@ -11,8 +11,10 @@ import java.util.regex.Pattern;
 
 import dev.sam.common.net.IngressPolicy;
 import dev.sam.common.net.IngressPolicy.Transport;
+import dev.sam.common.net.gate.ConnectionGuard;
 import dev.sam.common.net.gate.IngressGateHandler;
 import dev.sam.common.net.gate.IngressRoutes;
+import dev.sam.common.net.ip.ClientIp;
 import dev.sam.common.net.ip.RealIpResolver;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelFutureListener;
@@ -198,7 +200,14 @@ public final class WebSocketUpgrade {
                 }
                 if (msg instanceof HttpRequest request) {
                     // Antes de validar: el intento de falsificar la IP se audita aunque se rechace
-                    realIp.apply(ctx.channel(), request.headers());
+                    var channel = ctx.channel();
+                    realIp.apply(channel, request.headers());
+                    // El lugar de la conexión pasa a la IP real; sin lugar, cierre sin respuesta (RS-WS-03)
+                    if (!ClientIp.of(channel).map(ip -> ConnectionGuard.attribute(channel, ip)).orElse(true)) {
+                        rejected = true;
+                        ctx.close();
+                        return;
+                    }
                     var status = check(request, path);
                     if (status != null) {
                         reject(ctx, status);

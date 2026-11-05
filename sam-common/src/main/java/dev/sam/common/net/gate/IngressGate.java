@@ -16,9 +16,15 @@ public final class IngressGate {
      * timeout de Minecraft, porque no le llega ningún byte). Idempotente.
      */
     public static void install(ChannelPipeline pipeline, IngressPolicy policy, Transport transport, IngressRoutes routes,
-            String kickMessage) {
+            String kickMessage, ConnectionGuard guard) {
         if (pipeline.get(IngressGateHandler.NAME) == null) {
-            pipeline.addFirst(IngressGateHandler.NAME, new IngressGateHandler(policy, transport, routes, kickMessage));
+            pipeline.addFirst(IngressGateHandler.NAME, new IngressGateHandler(policy, transport, routes, kickMessage, guard));
         }
+    }
+
+    /** Sin límites de conexiones. */
+    public static void install(ChannelPipeline pipeline, IngressPolicy policy, Transport transport, IngressRoutes routes,
+            String kickMessage) {
+        install(pipeline, policy, transport, routes, kickMessage, ConnectionGuard.unlimited());
     }
 }

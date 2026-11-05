@@ -59,6 +59,9 @@ if ($state -eq "listo") {
     if ((Get-Content "$Out\qatest.log" -Raw) -match "BUILD SUCCESSFUL") { $exit = 0 }
 }
 
+# Lo que el servidor registró durante las pruebas: auditoría y cualquier excepción
+Get-Content $log -Encoding UTF8 | Where-Object { $_ -match "auditoría|Exception|^\s+at " -and $_ -notmatch "COM exception" } | Select-Object -First 15 | ForEach-Object { "SERVIDOR: $_" }
+
 # Siempre: detener el servidor por RCON y esperar a que termine
 if (-not $server.HasExited) {
     try { & "$Tools\rcon.ps1" -ServerDir $ServerDir -Command "stop" | Out-Null } catch { Write-Output "QA: RCON falló: $($_.Exception.Message)" }

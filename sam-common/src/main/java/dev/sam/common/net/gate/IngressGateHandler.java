@@ -29,14 +29,24 @@ public final class IngressGateHandler extends ByteToMessageDecoder {
     private final Transport transport;
     private final IngressRoutes routes;
     private final String kickMessage;
+    private final ConnectionGuard guard;
     private ScheduledFuture<?> timeout;
+    /** El handshake WebSocket conserva el lugar de la conexión hasta clasificar dentro del túnel. */
+    private boolean keepPermit;
 
     /** @param kickMessage mensaje de la desconexión SAM-K001 para clientes sin SAM */
     public IngressGateHandler(IngressPolicy policy, Transport transport, IngressRoutes routes, String kickMessage) {
+        this(policy, transport, routes, kickMessage, ConnectionGuard.unlimited());
+    }
+
+    /** @param guard límites de conexiones sin clasificar (PROTOCOLO.md 10) */
+    public IngressGateHandler(IngressPolicy policy, Transport transport, IngressRoutes routes, String kickMessage,
+            ConnectionGuard guard) {
         this.policy = policy;
         this.transport = transport;
         this.routes = routes;
         this.kickMessage = kickMessage;
+        this.guard = guard;
     }
 
     /** Si en {@link #CLASSIFY_TIMEOUT} no se pudo clasificar, descarta lo recibido y cierra. */
@@ -44,11 +54,18 @@ public final class IngressGateHandler extends ByteToMessageDecoder {
     public void handlerAdded(ChannelHandlerContext ctx) {
         timeout = ctx.executor().schedule(() -> close(ctx, internalBuffer()),
             CLASSIFY_TIMEOUT.toNanos(), TimeUnit.NANOSECONDS);
+        // Sin lugar: cierre inmediato, antes de leer nada
+        if (!guard.admit(ctx.channel())) {
+            ctx.close();
+        }
     }
 
     @Override
     protected void handlerRemoved0(ChannelHandlerContext ctx) {
         timeout.cancel(false);
+        if (!keepPermit) {
+            ConnectionGuard.release(ctx.channel());
+        }
     }
 
     @Override
@@ -62,7 +79,10 @@ public final class IngressGateHandler extends ByteToMessageDecoder {
             }
             case CLOSE -> close(ctx, in);
             case SAM_TLS -> leaveOrClose(ctx, in, routes.installSamTls(ctx));
-            case WEBSOCKET_HANDSHAKE -> leaveOrClose(ctx, in, routes.installWebSocket(ctx));
+            case WEBSOCKET_HANDSHAKE -> {
+                keepPermit = true;
+                leaveOrClose(ctx, in, routes.installWebSocket(ctx));
+            }
             case VANILLA_RESTRICTED -> {
                 // El ping legacy (anterior a 1.7) no tiene handshake: lo atiende Minecraft directamente
                 if (classification != Classification.LEGACY_PING) {

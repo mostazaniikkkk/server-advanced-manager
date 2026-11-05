@@ -340,6 +340,8 @@ SAM_WS_TRUSTED_PROXIES=cloudflare           # cloudflare | lista de CIDR | vací
 SAM_WS_REAL_IP_HEADER=CF-Connecting-IP      # o X-Forwarded-For
 SAM_WS_MAX_MESSAGE=1MiB
 SAM_WS_HANDSHAKE_TIMEOUT=5s
+SAM_NET_UNCLASSIFIED_PER_IP=8               # conexiones sin clasificar (incluye handshake WebSocket)
+SAM_NET_UNCLASSIFIED_GLOBAL=256
 SAM_RCON_SENSITIVE_COMMANDS=false           # comandos sensibles de SAM desde RCON
 
 # ===== Métodos de login disponibles =====

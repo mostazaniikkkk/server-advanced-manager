@@ -18,6 +18,7 @@ import dev.sam.common.net.IngressPolicy;
 import dev.sam.common.net.IngressPolicy.Action;
 import dev.sam.common.net.IngressPolicy.Transport;
 import dev.sam.common.net.ProtocolDetector.Classification;
+import dev.sam.common.net.gate.ConnectionGuard;
 import dev.sam.common.net.gate.IngressGate;
 import dev.sam.common.net.gate.IngressRoutes;
 import dev.sam.common.net.gate.SamRoutes;
@@ -33,19 +34,20 @@ public final class SamServer implements DedicatedServerModInitializer {
 
     static final String KICK_MESSAGE = "Este servidor requiere SAM Client para entrar. [SAM-K001]";
 
-    private record Ingress(IngressPolicy policy, IngressRoutes routes) {
+    private record Ingress(IngressPolicy policy, IngressRoutes routes, ConnectionGuard guard) {
     }
 
     /**
      * Hasta cargar configuración e identidad: solo TCP y las conexiones SAM se cierran (fallan
      * cerrado, RF-CFG-04). Política y rutas cambian juntas.
      */
-    private static volatile Ingress ingress = new Ingress(new IngressPolicy(true, false), IngressRoutes.closing());
+    private static volatile Ingress ingress = new Ingress(new IngressPolicy(true, false), IngressRoutes.closing(),
+        new ConnectionGuard(ConnectionGuard.DEFAULT_PER_IP, ConnectionGuard.DEFAULT_GLOBAL, address -> false));
 
     /** Lo llama el mixin de ServerConnectionListener al armar cada conexión TCP aceptada. */
     public static void installIngressGate(ChannelPipeline pipeline) {
         var current = ingress;
-        IngressGate.install(pipeline, current.policy(), Transport.DIRECT_TCP, current.routes(), KICK_MESSAGE);
+        IngressGate.install(pipeline, current.policy(), Transport.DIRECT_TCP, current.routes(), KICK_MESSAGE, current.guard());
     }
 
     @Override
@@ -62,6 +64,8 @@ public final class SamServer implements DedicatedServerModInitializer {
             LOGGER.error("Configuración de transporte inválida: {}. El login de SAM queda cerrado.", e.getMessage());
             return;
         }
+        // Los límites aplican aunque el login de SAM quede cerrado: el vanilla también pasa por la compuerta
+        ingress = new Ingress(ingress.policy(), ingress.routes(), transport.guard());
         loadIdentity(transport);
     }
 
@@ -72,7 +76,7 @@ public final class SamServer implements DedicatedServerModInitializer {
             var identity = ready.identity();
             // Hasta que exista la auditoría encadenada, los eventos de la entrada van al log
             var realIp = transport.realIp(message -> LOGGER.warn("[auditoría] {}", message));
-            ingress = new Ingress(transport.policy(), new SamRoutes(identity, transport.webSocketPath(), realIp));
+            ingress = new Ingress(transport.policy(), new SamRoutes(identity, transport.webSocketPath(), realIp), ingress.guard());
             LOGGER.info("Transporte: TCP directo {}, WebSocket {}",
                 transport.policy().decide(Transport.DIRECT_TCP, Classification.TLS) == Action.SAM_TLS ? "sí" : "no",
                 transport.webSocketPath().isPresent()

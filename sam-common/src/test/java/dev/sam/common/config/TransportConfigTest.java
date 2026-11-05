@@ -139,6 +139,39 @@ class TransportConfigTest {
         assertThat(audit.eventos).hasSize(1);
     }
 
+    // ===== Conexiones sin clasificar (PROTOCOLO.md 10) =====
+
+    @Test
+    void losLimitesDeConexionesSinClasificarSonOchoYDoscientosCincuentaYSeis() {
+        var config = TransportConfig.from(Map.of());
+        assertThat(config.unclassifiedPerIp()).isEqualTo(8);
+        assertThat(config.unclassifiedGlobal()).isEqualTo(256);
+    }
+
+    @Test
+    void losLimitesSeConfiguranConEnterosPositivos() {
+        var config = TransportConfig.from(Map.of(TransportConfig.UNCLASSIFIED_PER_IP, " 3 ",
+            TransportConfig.UNCLASSIFIED_GLOBAL, "40"));
+        assertThat(config.unclassifiedPerIp()).isEqualTo(3);
+        assertThat(config.unclassifiedGlobal()).isEqualTo(40);
+        for (var malo : List.of("0", "-1", "x", "", "2.5")) {
+            assertThatThrownBy(() -> TransportConfig.from(Map.of(TransportConfig.UNCLASSIFIED_PER_IP, malo)))
+                .as(malo).isInstanceOf(IllegalArgumentException.class).hasMessageContaining(TransportConfig.UNCLASSIFIED_PER_IP);
+            assertThatThrownBy(() -> TransportConfig.from(Map.of(TransportConfig.UNCLASSIFIED_GLOBAL, malo)))
+                .as(malo).isInstanceOf(IllegalArgumentException.class).hasMessageContaining(TransportConfig.UNCLASSIFIED_GLOBAL);
+        }
+    }
+
+    @Test
+    void elGuardiaUsaLosLimitesYNoCuentaPorIpALosProxies() {
+        var guardia = TransportConfig.from(conWs(TransportConfig.UNCLASSIFIED_PER_IP, "1")).guard();
+        var canal = RealIpTest.canalDesde(RealIpTest.ip("198.51.100.9"));
+        assertThat(guardia.admit(canal)).isTrue();
+        assertThat(guardia.admit(RealIpTest.canalDesde(RealIpTest.ip("198.51.100.9")))).isFalse();
+        assertThat(guardia.admit(RealIpTest.canalDesde(RealIpTest.ip("162.158.10.20")))).isTrue();
+        assertThat(guardia.admit(RealIpTest.canalDesde(RealIpTest.ip("162.158.10.20")))).isTrue();
+    }
+
     @Test
     void sinWebSocketLosProxiesNoSeUsan() {
         var config = TransportConfig.from(Map.of(TransportConfig.TRUSTED_PROXIES, "10.0.0.0/33"));

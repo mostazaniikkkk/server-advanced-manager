@@ -127,6 +127,15 @@ class SamClientTlsQaTest {
         }
     }
 
+    @Test
+    void unaIpFalsificadaDesdeUnOrigenNoConfiableSeIgnoraYElHandshakeSigue() throws Exception {
+        // 127.0.0.1 no es un proxy de confianza: la cabecera se ignora y se audita (RS-WS-02)
+        try (var conexion = Conexion.cruda()) {
+            conexion.enviar(peticionWebSocket("CF-Connecting-IP: 203.0.113.7" + CRLF).getBytes(StandardCharsets.US_ASCII));
+            assertThat(leerCabecera(conexion.entrada())).startsWith("HTTP/1.1 101 ");
+        }
+    }
+
     private static final String WS_PATH = System.getProperty("sam.qa.wsPath", "/qa-ws");
     private static final String CRLF = "\r\n";
 

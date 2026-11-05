@@ -673,7 +673,7 @@ Formato del mensaje al jugador: texto traducible + código entre corchetes (por 
 | `sam:hello_ack` | 10 s | No |
 | Autenticación completa | 120 s (300 s con OAuth) | `SAM_AUTH_TIMEOUT` |
 | Ping WebSocket / cierre sin pong | 20 s / 60 s | No |
-| Conexiones sin clasificar por IP / global | 8 / 256 | Sí |
+| Conexiones sin clasificar por IP / global | 8 / 256 | `SAM_NET_UNCLASSIFIED_PER_IP` / `_GLOBAL` (los proxies de confianza cuentan solo en el global; en el handshake WebSocket cuenta la IP real) |
 | Logins pendientes por IP / global | 3 / 50 | `SAM_AUTH_PENDING_*` |
 | Descarga de scripts por conexión | 16 MiB | Sí |
 
