@@ -597,6 +597,29 @@ ui/panel.lua	1232d8379de77e154ca533689af2e42629dd7574bda5a0a390799849f07607c3
 
 `lock_sha256` = `e0f67bcd51d697c24ce1826b3b5495f0c62b6e877493ee353005854f7a72f38d`
 
+**`signature.json`: forma canónica y lectura estricta** (`ScriptSignature`). La escritura es siempre:
+
+```
+{"format":"sam-sig-v1","key_id":"<16 hex>","lock_sha256":"<64 hex>","signature":"<base64 de 64 bytes>"}\n
+```
+
+La lectura admite otro orden de claves y espacio en blanco, pero rechaza todo lo que pueda leerse distinto en dos implementaciones:
+- más de 512 bytes, o cualquier carácter fuera del ASCII imprimible;
+- espacio en blanco que no sea el de JSON (espacio, tab, LF, CR). El `\s` de Java aceptaría también `\f` y `\x0B`;
+- claves duplicadas (un lector podría quedarse con la primera y otro con la última), desconocidas o faltantes;
+- escapes (`a`), valores que no sean strings, comas finales o texto tras el objeto;
+- hex en mayúsculas o de longitud incorrecta, y base64 no canónico (bits de relleno distintos de cero).
+
+`key_id` = primeros 8 bytes de SHA-256 de la clave pública cruda (32 bytes), en hex. Mensaje firmado: `"SAM-script-v1" ‖ lock_sha256` (32 bytes).
+
+**Vector** (`cryptography` de Python; fijado en `ScriptSignatureTest` y `ScriptSigningTest`): el lockfile de arriba firmado con la clave K1 de la RFC 8032 (`key_id` = `21fe31dfa154a261`):
+
+```
+{"format":"sam-sig-v1","key_id":"21fe31dfa154a261","lock_sha256":"e0f67bcd51d697c24ce1826b3b5495f0c62b6e877493ee353005854f7a72f38d","signature":"3LVXhNjtUBJ6g2kmsCTjBda7+iNyk6Id/pHFIN6dTuUDjhaPy9RpeyRrG0CEniaqjYCvYXnskdxox4cKv6t7Aw=="}
+```
+
+**Resultado de la verificación** (`ScriptVerifier`), en este orden: `MISSING_SIGNATURE`, `MALFORMED_SIGNATURE`, `INVALID_FILES`, `UNKNOWN_KEY`, `LOCK_MISMATCH`, `BAD_SIGNATURE` o válido.
+
 El `sha256` de `ScriptRef` (5.5) es el `lock_sha256`, y el paquete que se transfiere es un archivo `.zip` **sin compresión** con exactamente los archivos del lockfile más `signature.json`. El cliente lo descomprime en memoria con límites de cantidad de archivos (≤ 256) y de tamaño total.
 
 ### 8.3 Claves de `sam-signer`
