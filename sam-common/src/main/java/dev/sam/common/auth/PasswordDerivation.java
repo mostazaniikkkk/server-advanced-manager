@@ -2,13 +2,12 @@ package dev.sam.common.auth;
 
 import java.nio.CharBuffer;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.text.Normalizer;
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.function.Function;
 
+import dev.sam.common.crypto.Hashes;
 import dev.sam.common.identity.ServerId;
 
 /**
@@ -36,11 +35,9 @@ public final class PasswordDerivation {
         if (username.isBlank()) {
             throw new IllegalArgumentException("El usuario no puede estar vacío");
         }
-        var digest = sha256();
-        digest.update(DOMAIN);
-        digest.update(serverId.toBytes());
-        digest.update(username.toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8));
-        return Arrays.copyOf(digest.digest(), SALT_LENGTH);
+        var hash = Hashes.sha256(DOMAIN, serverId.toBytes(),
+            username.toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8));
+        return Arrays.copyOf(hash, SALT_LENGTH);
     }
 
     /**
@@ -77,14 +74,6 @@ public final class PasswordDerivation {
         } finally {
             Arrays.fill(password, '\0');
             Arrays.fill(encoded, (byte) 0);
-        }
-    }
-
-    private static MessageDigest sha256() {
-        try {
-            return MessageDigest.getInstance("SHA-256");
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("La JVM no ofrece SHA-256", e);
         }
     }
 }

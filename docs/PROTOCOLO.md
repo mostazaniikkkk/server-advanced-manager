@@ -15,7 +15,7 @@
 | P-04 | Qué se fija (pin) | **SHA-256 de la SubjectPublicKeyInfo (SPKI)** de la clave del servidor, no del certificado entero | Hash del certificado | 3.3 |
 | P-05 | Dónde va el `server_id` en el certificado | Atributo `serialNumber` del Subject (`CN=SAM Server, SERIALNUMBER=<server_id hex>`) | Extensión X.509 con OID propio (requiere registrar un PEN) | 3.1 |
 | P-06 | Parámetros de Argon2id | Cliente: m=64 MiB, t=3, p=1. Servidor (sobre `K`): m=19 MiB, t=2, p=1 (mínimo de OWASP). Ajustables tras medir en la fase 0 | Otros costos | 6 |
-| P-07 | Frase de 3 palabras de la huella | 3 palabras de una lista de 2048 palabras en español (33 bits) derivadas del pin, más un identicon | Lista EFF en inglés | 3.5 |
+| P-07 | Frase de 3 palabras de la huella | 3 palabras de la lista BIP-39 en español (2048 palabras, 33 bits) derivadas del pin, más un identicon con paleta fija de 16 colores | Lista EFF en inglés, lista propia, color HSL | 3.5 |
 | P-08 | Formato de firma de scripts | Archivo `signature.json` con un lockfile de texto canónico (`ruta\tsha256\n` ordenado) firmado con Ed25519. Sin JSON canónico ni librerías extra | JSON canónico (RFC 8785), JWS | 8.2 |
 | P-09 | Reanudación de sesiones TLS y 0-RTT | **Deshabilitadas.** Simplifica el análisis: cada conexión hace un handshake completo | Habilitar la reanudación sin 0-RTT | 3.2 |
 | P-10 | ALPN | `sam/1` obligatorio en el handshake TLS | ALPN opcional, sin ALPN | 3.2 |
@@ -186,15 +186,28 @@ si servers[id] no existe:
 ### 3.5 Huella visual (P-07)
 
 ```
-h       = SHA-256("SAM-fp-v1" ‖ pin)
-palabras = 3 índices de 11 bits tomados de h[0..4] → lista de 2048 palabras en español
-identicon = cuadrícula simétrica 5×5 con colores derivados de h[5..8]
-huella hex = primeros 16 bytes de pin, en grupos de 4 (para comparar a mano)
+h        = SHA-256("SAM-fp-v1" ‖ pin)                          pin: 32 bytes (3.3)
+n        = entero big-endian de h[0..5)                        40 bits
+palabras = lista[(n >> 29) & 0x7FF], lista[(n >> 18) & 0x7FF], lista[(n >> 7) & 0x7FF]
+celdas   = entero big-endian de h[5..7)                        16 bits
+           celda (fila r, columna c) pintada si el bit (15 − (3r + min(c, 4−c))) está en 1
+color    = PALETA[h[7] & 0x0F]
+hex      = pin[0..16) en hexadecimal mayúscula, 8 grupos de 4 separados por espacio
 ```
 
-Ejemplo de presentación: **«naranja · puente · silencio»** + identicon + `A1B2 C3D4 E5F6 0718 …`.
+- **Lista de palabras**: el archivo oficial de **BIP-39 en español** (`bitcoin/bips`, `bip-0039/spanish.txt`), incluido **sin modificar** en `sam-common` (SHA-256 `46846a5a0139d1e3cb77293e521c2865f7bcdb82c44e8d0a06a2cd0ecba48c0b`, verificado en los tests y contra el paquete `mnemonic` de Trezor). El archivo está en NFD; al cargarlo se normaliza a **NFC** para que la fuente del juego dibuje bien las tildes. En NFC, las 4 primeras letras identifican cada palabra. La lista y su orden **no cambian** dentro de la versión mayor del protocolo.
+- **Paleta** (16 colores, en este orden): `C62828 AD1457 6A1B9A 4527A0 283593 1565C0 0277BD 00838F 00695C 2E7D32 558B2F 9E9D24 F9A825 EF6C00 D84315 4E342E`. Se usa una paleta fija en lugar de HSL para evitar diferencias de redondeo entre implementaciones.
+- El identicon es simétrico de izquierda a derecha: las columnas 3 y 4 repiten las 1 y 0.
 
-La lista de palabras va incluida en `sam-common` y **no cambia** dentro de la versión mayor del protocolo.
+Ejemplo de presentación: **«náusea · ducha · límite»** + identicon + `E96E 02D8 E47F 2A7C …`.
+
+**Vectores** (implementación de referencia en Python, independiente; fijados en `ServerFingerprintTest`):
+
+| pin | palabras | celdas (máscara) | color | hex |
+|---|---|---|---|---|
+| `000102…1e1f` | satán · testigo · chupar | `0x456d40` | `4527A0` | `0001 0203 0405 0607 0809 0A0B 0C0D 0E0F` |
+| `ff…ff` (32 × `0xFF`) | culpa · oír · leal | `0x000080` | `1565C0` | `FFFF FFFF FFFF FFFF FFFF FFFF FFFF FFFF` |
+| SHA-256(`"sam"`) | náusea · ducha · límite | `0xa8fc84` | `00695C` | `E96E 02D8 E47F 2A7C 03BE 5117 B3ED 175C` |
 
 ### 3.6 Modo CA (opcional)
 
