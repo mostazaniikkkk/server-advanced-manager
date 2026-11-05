@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "sam-server",
+  "version": "${version}",
+  "name": "SAM Server",
+  "description": "Server Advanced Manager: autenticación reforzada, conexión cifrada y scripting Lua. Lado servidor.",
+  "authors": ["Sergio Valle"],
+  "license": "MIT",
+  "environment": "server",
+  "entrypoints": {
+    "server": ["dev.sam.server.SamServer"]
+  },
+  "depends": {
+    "fabricloader": ">=0.20.1",
+    "minecraft": "1.21.1",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}

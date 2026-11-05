@@ -1,17 +1,26 @@
 [versions]
+# Fabric: misma combinación que ya funciona en esta máquina (proyecto soulsmode), con Loom fijo en lugar de SNAPSHOT
+minecraft = "1.21.1"
+fabricLoader = "0.20.1"
+fabricApi = "0.116.17+1.21.1"
+loom = "1.19.3"
+# Minecraft 1.21.1 trae Netty 4.1.97 sin netty-codec-http: se embebe la misma versión
+netty = "4.1.97.Final"
 junit = "5.11.3"
 assertj = "3.26.3"
 jqwik = "1.9.1"
 bouncycastle = "1.79"
 # Gson lo provee Minecraft en tiempo de ejecución; verificar la versión de 1.21.1 al montar Fabric
 gson = "2.10.1"
-pitestCore = "1.17.0"
-pitestJunit5 = "1.2.1"
-pitestGradle = "1.15.0"
-jacoco = "0.8.12"
+# Gradle corre sobre JDK 25 (lo exige Loom 1.19): JaCoCo y PIT en versiones con soporte de Java 25
+pitestCore = "1.30.1"
+pitestJunit5 = "1.2.3"
+pitestGradle = "1.19.0"
+jacoco = "0.8.16"
 
 [plugins]
 pitest = { id = "info.solidsoft.pitest", version.ref = "pitestGradle" }
+loom = { id = "net.fabricmc.fabric-loom-remap", version.ref = "loom" }
 
 [libraries]
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
@@ -21,3 +30,7 @@ assertj = { module = "org.assertj:assertj-core", version.ref = "assertj" }
 jqwik = { module = "net.jqwik:jqwik", version.ref = "jqwik" }
 bouncycastle-prov = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
 gson = { module = "com.google.code.gson:gson", version.ref = "gson" }
+minecraft = { module = "com.mojang:minecraft", version.ref = "minecraft" }
+fabric-loader = { module = "net.fabricmc:fabric-loader", version.ref = "fabricLoader" }
+fabric-api = { module = "net.fabricmc.fabric-api:fabric-api", version.ref = "fabricApi" }
+netty-codec-http = { module = "io.netty:netty-codec-http", version.ref = "netty" }

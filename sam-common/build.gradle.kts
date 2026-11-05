@@ -4,12 +4,6 @@ plugins {
     alias(libs.plugins.pitest)
 }
 
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
-    }
-}
-
 repositories {
     mavenCentral()
 }
@@ -27,8 +21,10 @@ dependencies {
     testRuntimeOnly(libs.junit.launcher)
 }
 
+// Gradle corre sobre JDK 25 (Loom 1.19 lo exige); se compila para Java 21, que es lo que pide Minecraft 1.21.1
 tasks.withType<JavaCompile>().configureEach {
     options.encoding = "UTF-8"
+    options.release = 21
     options.compilerArgs.addAll(listOf("-Xlint:all", "-Werror"))
 }
 

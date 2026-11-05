@@ -19,9 +19,10 @@ public record ScriptPath(String value) implements Comparable<ScriptPath> {
     private static final Pattern SEGMENT = Pattern.compile("[a-z0-9_.\\-]+");
 
     public ScriptPath {
-        if (value.isEmpty() || value.length() > MAX_LENGTH) {
+        if (value.length() > MAX_LENGTH) {
             throw invalid(value);
         }
+        // Una ruta vacía es un único segmento vacío: la rechaza el patrón de segmento
         for (var segment : value.split("/", -1)) {
             if (!SEGMENT.matcher(segment).matches() || segment.equals(".") || segment.equals("..")) {
                 throw invalid(value);

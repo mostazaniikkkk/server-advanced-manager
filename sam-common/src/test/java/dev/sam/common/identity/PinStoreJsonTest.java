@@ -66,6 +66,27 @@ class PinStoreJsonTest {
         assertThat(PinStoreJson.encode(alReves)).isEqualTo(ejemploJson());
     }
 
+    @Test
+    void conMuchosServidoresElArchivoSaleOrdenado() {
+        // Ojo: con ids consecutivos (…01, …02) los hashes también lo son y Map.copyOf los itera en
+        // orden, así que un archivo SIN ordenar saldría ordenado igual y el test no probaría nada.
+        // Ids y direcciones pseudoaleatorios (SHA-256) hacen que el orden de iteración no sea el alfabético.
+        var store = PinStore.empty();
+        for (int i = 0; i < 20; i++) {
+            var hash = dev.sam.common.crypto.Hashes.sha256(new byte[] {(byte) i});
+            var id = ServerId.of(java.util.Arrays.copyOf(hash, 16));
+            var direccion = ServerAddress.parse(java.util.HexFormat.of().formatHex(hash, 16, 20) + ".net");
+            store = store.trust(direccion, id, TestKeys.fromSeed(hash).publicKey(), "S" + i, T0);
+        }
+        var json = PinStoreJson.encode(store);
+        var ids = java.util.regex.Pattern.compile("\"([0-9a-f]{32})\": \\{").matcher(json).results()
+            .map(r -> r.group(1)).toList();
+        var direcciones = java.util.regex.Pattern.compile("\"([0-9a-f]{8}\\.net)\":").matcher(json).results()
+            .map(r -> r.group(1)).toList();
+        assertThat(ids).hasSize(20).isSorted();
+        assertThat(direcciones).hasSize(20).isSorted();
+    }
+
     // ===== Lectura =====
 
     @Test
