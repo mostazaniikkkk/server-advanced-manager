@@ -45,4 +45,9 @@ while (-not $proc.HasExited) {
 
 if ($proc.HasExited) {
     Write-Output "VIGILANTE: gradlew terminó con código $($proc.ExitCode) en $([int]((Get-Date) - $start).TotalSeconds) s"
+    # javac y Gradle escriben los errores en stderr: si falló, mostrar lo esencial de ahí
+    if ($proc.ExitCode -ne 0 -and (Test-Path "$Log.err")) {
+        Get-Content "$Log.err" -Encoding UTF8 | Where-Object { $_ -match "\.java:\d+: (error|warning)|What went wrong|> .*failed|Compilation failed" } |
+            Select-Object -First 15 | ForEach-Object { "VIGILANTE (stderr): $_" }
+    }
 }

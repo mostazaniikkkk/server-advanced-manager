@@ -7,6 +7,7 @@ import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.HexFormat;
+import java.util.Optional;
 
 import javax.net.ssl.SSLEngine;
 
@@ -29,7 +30,7 @@ import io.netty.handler.ssl.SslHandler;
  * dentro habla el protocolo de Minecraft. El ping de estado llega a Minecraft; el login, mientras
  * no exista el módulo de autenticación, recibe SAM-K006 (nadie entra sin autenticarse).
  */
-class SamTlsRoutesTest {
+class SamRoutesTest {
 
     private static final byte[] HANDSHAKE_STATUS = HexFormat.of().parseHex("1000ff05093132372e302e302e3163df01");
     private static final byte[] HANDSHAKE_LOGIN = HexFormat.of().parseHex("1000ff05093132372e302e302e3163df02");
@@ -56,19 +57,19 @@ class SamTlsRoutesTest {
         var conexion = new Conexion();
         assertThat(conexion.handshakeTls()).isTrue();
         conexion.enviar(HANDSHAKE_LOGIN);
-        assertThat(conexion.recibido()).isEqualTo(LoginDisconnect.frame(SamTlsRoutes.LOGIN_UNAVAILABLE));
+        assertThat(conexion.recibido()).isEqualTo(LoginDisconnect.frame(SamRoutes.LOGIN_UNAVAILABLE));
         assertThat(conexion.minecraft.bytes()).isEmpty();
         assertThat(conexion.servidor.isOpen()).isFalse();
     }
 
     @Test
     void elMensajeDeLoginNoDisponibleLlevaSuCodigo() {
-        assertThat(SamTlsRoutes.LOGIN_UNAVAILABLE).contains("SAM-K006");
+        assertThat(SamRoutes.LOGIN_UNAVAILABLE).contains("SAM-K006");
     }
 
     @Test
-    void laRutaWebSocketTodaviaNoExisteYSeCierra() {
-        var routes = new SamTlsRoutes(identidad);
+    void sinRutaWebSocketConfiguradaUnaPeticionHttpSeCierra() {
+        var routes = new SamRoutes(identidad, Optional.empty());
         var canal = new EmbeddedChannel();
         IngressGate.install(canal.pipeline(), new IngressPolicy(true, true), Transport.DIRECT_TCP, routes, "kick");
         canal.writeInbound(Unpooled.wrappedBuffer("GET / HTTP/1.1\r\n".getBytes(java.nio.charset.StandardCharsets.US_ASCII)));
@@ -80,7 +81,7 @@ class SamTlsRoutesTest {
         var conexion = new Conexion();
         assertThat(conexion.handshakeTls()).isTrue();
         assertThat(conexion.servidor.pipeline().names())
-            .containsSubsequence(SamTlsRoutes.TLS_NAME, SamTlsRoutes.ALPN_GUARD_NAME, IngressGateHandler.VANILLA_GATE_NAME, "minecraft")
+            .containsSubsequence(SamRoutes.TLS_NAME, SamRoutes.ALPN_GUARD_NAME, IngressGateHandler.VANILLA_GATE_NAME, "minecraft")
             .doesNotContain(IngressGateHandler.NAME);
     }
 
@@ -94,7 +95,7 @@ class SamTlsRoutesTest {
 
         Conexion() {
             IngressGate.install(servidor.pipeline(), new IngressPolicy(true, false), Transport.DIRECT_TCP,
-                new SamTlsRoutes(identidad), "kick vanilla");
+                new SamRoutes(identidad, Optional.empty()), "kick vanilla");
             servidor.pipeline().addLast("minecraft", minecraft);
             SSLEngine engine = SamTls.clientEngine(new ServerCertificateObserver(), "127.0.0.1", 25567);
             tlsCliente = new SslHandler(engine);

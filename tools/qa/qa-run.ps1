@@ -28,6 +28,10 @@ if (-not (Test-Path $passFile)) {
     [System.IO.File]::WriteAllText($passFile, (($bytes | ForEach-Object { $_.ToString("x2") }) -join ""))
 }
 $env:SAM_IDENTITY_PASSPHRASE = ([System.IO.File]::ReadAllText($passFile)).Trim()
+# Transporte de QA: TCP directo y WebSocket en el mismo puerto (la ruta coincide con sam.qa.wsPath de qaTest)
+$env:SAM_TCP_ENABLED = "true"
+$env:SAM_WS_ENABLED = "true"
+$env:SAM_WS_PATH = "/qa-ws"
 
 $log = Join-Path $ServerDir "server-run.log"
 $server = Start-Process -FilePath $java -ArgumentList "-Xmx2G", "-jar", "fabric-server-launch.jar", "nogui" -WorkingDirectory $ServerDir `
@@ -46,11 +50,11 @@ while (((Get-Date) - $start).TotalSeconds -lt 180) {
     if (((Get-Date) - $lastChange).TotalSeconds -ge 60) { $state = "log trabado 60 s"; break }
 }
 Write-Output ("QA: servidor {0} en {1} s" -f $state, [int]((Get-Date) - $start).TotalSeconds)
-Get-Content $log -Encoding UTF8 | Where-Object { $_ -match "SAM Server|Identidad del servidor|SAM_IDENTITY|Loading \d+ mods|Starting Minecraft server on|ERROR" } | Select-Object -First 8
+Get-Content $log -Encoding UTF8 | Where-Object { $_ -match "SAM Server|Identidad del servidor|Transporte|SAM_IDENTITY|Loading \d+ mods|Starting Minecraft server on|ERROR" } | Select-Object -First 10
 
 $exit = 1
 if ($state -eq "listo") {
-    & "$Tools\gradle-watch.ps1" -ProjectDir $ProjectDir -GradleArgs ":sam-server:qaTest --console=plain" -Log "$Out\qatest.log" -StallSeconds 120 -MaxMinutes 6 | Out-Null
+    & "$Tools\gradle-watch.ps1" -ProjectDir $ProjectDir -GradleArgs ":sam-server:qaTest --console=plain" -Log "$Out\qatest.log" -StallSeconds 120 -MaxMinutes 6 | Where-Object { $_ -like "VIGILANTE (stderr)*" }
     Get-Content "$Out\qatest.log" | Where-Object { $_ -match "QaTest > .* (PASSED|FAILED)|BUILD (SUCCESSFUL|FAILED)|Expecting|but was|expected|as \[" } | Select-Object -First 20
     if ((Get-Content "$Out\qatest.log" -Raw) -match "BUILD SUCCESSFUL") { $exit = 0 }
 }

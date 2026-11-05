@@ -42,6 +42,7 @@ dependencies {
     "qaTestImplementation"(libs.netty.codec)
     "qaTestImplementation"(libs.netty.transport)
     "qaTestImplementation"(libs.netty.handler)
+    "qaTestImplementation"(libs.netty.codec.http)
     "qaTestImplementation"(platform(libs.junit.bom))
     "qaTestImplementation"(libs.junit.jupiter)
     "qaTestImplementation"(libs.assertj)
@@ -55,6 +56,7 @@ tasks.register<Test>("qaTest") {
     classpath = qaTestSourceSet.runtimeClasspath
     useJUnitPlatform()
     systemProperty("sam.qa.port", (findProperty("samQaPort") as String?) ?: "25567")
+    systemProperty("sam.qa.wsPath", (findProperty("samQaWsPath") as String?) ?: "/qa-ws")
     outputs.upToDateWhen { false }
     testLogging {
         events("passed", "failed")

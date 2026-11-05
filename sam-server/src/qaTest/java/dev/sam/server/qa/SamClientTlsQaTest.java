@@ -11,6 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.io.IOException;
 import java.io.InputStream;
 import java.security.SecureRandom;
+import java.nio.charset.StandardCharsets;
 import java.security.cert.X509Certificate;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -27,6 +28,7 @@ import org.junit.jupiter.api.Test;
 
 import dev.sam.common.net.tls.SamTls;
 import dev.sam.common.net.tls.ServerCertificateObserver;
+import dev.sam.common.net.ws.WebSocketTunnel;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -36,6 +38,8 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.handler.codec.http.websocketx.WebSocket13FrameDecoder;
+import io.netty.handler.codec.http.websocketx.WebSocket13FrameEncoder;
 import io.netty.handler.ssl.SslHandler;
 
 /**
@@ -103,10 +107,53 @@ class SamClientTlsQaTest {
         }
     }
 
+    @Test
+    void elTlsDeSamTambienEntraPorWebSocketEnElMismoPuerto() throws Exception {
+        var observador = new ServerCertificateObserver();
+        try (var conexion = Conexion.abrirWebSocket(observador)) {
+            conexion.enviar(handshake(1), QaWire.STATUS_REQUEST);
+            var respuesta = leerFrame(conexion.entrada());
+            assertThat(respuesta.id()).isZero();
+            assertThat(respuesta.texto()).contains("SAM QA");
+        }
+        assertThat(observador.observed()).isPresent();
+    }
+
+    @Test
+    void unWebSocketConOriginRecibe403() throws Exception {
+        try (var conexion = Conexion.cruda()) {
+            conexion.enviar(peticionWebSocket("Origin: https://evil.example" + CRLF).getBytes(StandardCharsets.US_ASCII));
+            assertThat(leerCabecera(conexion.entrada())).startsWith("HTTP/1.1 403 ");
+        }
+    }
+
+    private static final String WS_PATH = System.getProperty("sam.qa.wsPath", "/qa-ws");
+    private static final String CRLF = "\r\n";
+
+    private static String peticionWebSocket(String extra) {
+        return "GET " + WS_PATH + " HTTP/1.1" + CRLF + "Host: " + HOST + CRLF + "Upgrade: websocket" + CRLF
+            + "Connection: Upgrade" + CRLF + "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" + CRLF
+            + "Sec-WebSocket-Version: 13" + CRLF + "Sec-WebSocket-Protocol: sam.v1" + CRLF + extra + CRLF;
+    }
+
+    /** Lee la respuesta HTTP hasta la línea en blanco. */
+    private static String leerCabecera(InputStream in) throws IOException {
+        var texto = new StringBuilder();
+        while (!texto.toString().endsWith(CRLF + CRLF)) {
+            int b = in.read();
+            if (b < 0) {
+                break;
+            }
+            texto.append((char) b);
+        }
+        return texto.toString();
+    }
+
     // ===== Cliente Netty con el perfil TLS de SAM y lectura bloqueante =====
 
     private static final class Conexion implements AutoCloseable {
         private static final byte[] FIN = new byte[0];
+        private static final String DATOS = "datos";
         private final Channel canal;
         private final BlockingQueue<byte[]> recibido;
 
@@ -116,13 +163,44 @@ class SamClientTlsQaTest {
         }
 
         static Conexion abrir(ServerCertificateObserver observador) throws Exception {
-            var recibido = new LinkedBlockingQueue<byte[]>();
+            var conexion = cruda();
             var tls = new SslHandler(SamTls.clientEngine(observador, HOST, PORT));
+            conexion.canal.eventLoop().submit(() -> conexion.canal.pipeline().addFirst(tls)).sync();
+            esperarTls(tls);
+            return conexion;
+        }
+
+        /** Handshake HTTP de WebSocket en claro y después el TLS de SAM dentro de los mensajes binarios. */
+        static Conexion abrirWebSocket(ServerCertificateObserver observador) throws Exception {
+            var conexion = cruda();
+            conexion.enviar(peticionWebSocket("").getBytes(StandardCharsets.US_ASCII));
+            var respuesta = leerCabecera(conexion.entrada());
+            assertThat(respuesta).startsWith("HTTP/1.1 101 ").containsIgnoringCase("sec-websocket-protocol: sam.v1");
+            var tls = new SslHandler(SamTls.clientEngine(observador, HOST, PORT));
+            // El TLS va último: al agregarlo empieza el handshake, y el ClientHello ya debe salir en frames
+            conexion.canal.eventLoop().submit(() -> conexion.canal.pipeline()
+                .addBefore(DATOS, null, new WebSocket13FrameEncoder(true))
+                .addBefore(DATOS, null, new WebSocket13FrameDecoder(false, false, WebSocketTunnel.MAX_MESSAGE))
+                .addBefore(DATOS, null, new WebSocketTunnel())
+                .addBefore(DATOS, null, tls)).sync();
+            esperarTls(tls);
+            return conexion;
+        }
+
+        private static void esperarTls(SslHandler tls) throws InterruptedException {
+            assertThat(tls.handshakeFuture().await(5, TimeUnit.SECONDS)).as("handshake TLS a tiempo").isTrue();
+            assertThat(tls.handshakeFuture().isSuccess()).as("handshake TLS exitoso: %s", tls.handshakeFuture().cause()).isTrue();
+            assertThat(tls.engine().getApplicationProtocol()).isEqualTo(SamTls.ALPN);
+        }
+
+        /** Conexión TCP sin nada encima: lo que llega queda en la cola de lectura. */
+        static Conexion cruda() throws Exception {
+            var recibido = new LinkedBlockingQueue<byte[]>();
             var canal = new Bootstrap().group(grupo).channel(NioSocketChannel.class)
                 .handler(new ChannelInitializer<Channel>() {
                     @Override
                     protected void initChannel(Channel ch) {
-                        ch.pipeline().addLast(tls, new ChannelInboundHandlerAdapter() {
+                        ch.pipeline().addLast(DATOS, new ChannelInboundHandlerAdapter() {
                             @Override
                             public void channelRead(ChannelHandlerContext ctx, Object msg) {
                                 var buf = (ByteBuf) msg;
@@ -140,9 +218,6 @@ class SamClientTlsQaTest {
                     }
                 })
                 .connect(HOST, PORT).sync().channel();
-            assertThat(tls.handshakeFuture().await(5, TimeUnit.SECONDS)).as("handshake TLS a tiempo").isTrue();
-            assertThat(tls.handshakeFuture().isSuccess()).as("handshake TLS exitoso: %s", tls.handshakeFuture().cause()).isTrue();
-            assertThat(tls.engine().getApplicationProtocol()).isEqualTo(SamTls.ALPN);
             return new Conexion(canal, recibido);
         }
 
@@ -153,8 +228,7 @@ class SamClientTlsQaTest {
             canal.flush();
         }
 
-        InputStream entrada() {
-            return new InputStream() {
+        private final InputStream entrada = new InputStream() {
                 private byte[] actual = new byte[0];
                 private int pos;
                 private boolean fin;
@@ -181,6 +255,10 @@ class SamClientTlsQaTest {
                     return fin ? -1 : actual[pos++] & 0xFF;
                 }
             };
+
+        /** Una sola corriente por conexión: lo leído de más no se pierde entre lecturas. */
+        InputStream entrada() {
+            return entrada;
         }
 
         @Override
