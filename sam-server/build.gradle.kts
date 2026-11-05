@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.loom)
 }
@@ -25,6 +27,35 @@ dependencies {
 tasks.withType<JavaCompile>().configureEach {
     options.encoding = "UTF-8"
     options.release = 21
+}
+
+// ===== Instalación en el servidor QA local (solo a pedido: nunca la dispara un build) =====
+// La ruta es propia de cada máquina: va en local.properties (fuera del repositorio) o con -PsamQaServerDir=...
+val localProperties = Properties().apply {
+    rootProject.file("local.properties").takeIf { it.exists() }?.reader(Charsets.UTF_8)?.use { load(it) }
+}
+val qaServerDir: String? = (findProperty("samQaServerDir") as String?) ?: localProperties.getProperty("samQaServerDir")
+val qaModsDir = qaServerDir?.let { file("$it/mods") }
+
+val removeOldQaJars = tasks.register<Delete>("removeOldQaJars") {
+    description = "Borra versiones anteriores de sam-server de la carpeta mods del servidor QA."
+    group = "sam"
+    if (qaModsDir != null) {
+        delete(fileTree(qaModsDir) { include("sam-server-*.jar") })
+    }
+}
+
+tasks.register<Copy>("installQaServer") {
+    description = "Copia el jar de sam-server a la carpeta mods del servidor QA (samQaServerDir)."
+    group = "sam"
+    dependsOn(removeOldQaJars)
+    from(tasks.named("remapJar"))
+    into(qaModsDir ?: layout.buildDirectory.dir("qa-server-no-configurado"))
+    doFirst {
+        check(qaModsDir != null && qaModsDir.isDirectory) {
+            "Configura samQaServerDir en local.properties (o con -PsamQaServerDir=...) apuntando a un servidor con carpeta mods/"
+        }
+    }
 }
 
 tasks.processResources {
