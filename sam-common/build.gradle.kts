@@ -15,6 +15,8 @@ repositories {
 }
 
 dependencies {
+    implementation(libs.bouncycastle.prov)
+
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)

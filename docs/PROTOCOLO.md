@@ -446,13 +446,19 @@ login:     recalcular con los parámetros guardados y comparar en tiempo constan
 
 ### 6.3 Vectores de prueba
 
-Se generan en la fase 0 con una implementación de referencia (por ejemplo, `argon2-cffi`) y se publican aquí: al menos 3 casos (ASCII, acentos con NFKC, usuario con mayúsculas).
+Calculados con **argon2-cffi 23.1.0** (libargon2, la implementación de referencia en C), independiente de la librería que usa SAM (BouncyCastle). Están fijados en `PasswordDerivationTest`. `SID_1` = `00000000000000000000000000000001`, `SID_2` = `00000000000000000000000000000002`.
 
 | Caso | server_id | usuario | contraseña | K (hex) |
 |---|---|---|---|---|
-| V-PW-1 | `00…01` | `Steve` | `correct horse` | *(fase 0)* |
-| V-PW-2 | `00…01` | `steve` | `correct horse` | igual a V-PW-1 |
-| V-PW-3 | `00…01` | `Alex` | `contraseña` (NFC vs NFD) | *(fase 0, iguales)* |
+| V-PW-1 | `SID_1` | `Steve` | `correct horse battery staple` | `2670fc91c53990ea43eee76bdd79ab9dc1c573e61eaa334ba76f3d632e453ff0` |
+| V-PW-2 | `SID_1` | `steve` | `correct horse battery staple` | igual a V-PW-1 (usuario sin distinguir mayúsculas) |
+| V-PW-3 | `SID_1` | `Alex` | `contraseña` en NFC **y** en NFD | `94714c539adbeaee90659b787bca88a187ae136684ec47c06e7a629b7c4c6c4d` (ambas) |
+| V-PW-4 | `SID_1` | `Steve` | `ｃｏｒｒｅｃｔ horse battery staple` (ancho completo) | igual a V-PW-1 (NFKC) |
+| V-PW-5 | `SID_2` | `Steve` | `correct horse battery staple` | `1e84d73bb6c8debda213736336d99b3c756f33ef6a85deb14f96b0b8c783b1ed` (otro servidor, otro K) |
+
+Salts intermedios: `salt_c(SID_1, "Steve")` = `dbbc407f54f9da1064ac152aa8bfce53`, `salt_c(SID_1, "Alex")` = `4dd1f807568c9881943f3541a17464a2`.
+
+La librería Argon2 se valida además contra el vector oficial de la **RFC 9106, sección 5.3** (`Argon2idTest`).
 
 ---
 
