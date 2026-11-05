@@ -19,6 +19,9 @@ dependencies {
     include(project(":sam-common"))
     implementation(libs.bouncycastle.prov)
     include(libs.bouncycastle.prov)
+    implementation(libs.bouncycastle.pkix)
+    include(libs.bouncycastle.pkix)
+    include(libs.bouncycastle.util)
     implementation(libs.netty.codec.http)
     include(libs.netty.codec.http)
 }

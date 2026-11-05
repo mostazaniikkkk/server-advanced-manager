@@ -10,6 +10,8 @@ repositories {
 
 dependencies {
     implementation(libs.bouncycastle.prov)
+    // Construcción de certificados X.509 (la JDK no tiene API pública para generarlos)
+    implementation(libs.bouncycastle.pkix)
     // Minecraft trae Gson y Netty 4.1.97: se compila contra ellos pero no se empaquetan
     compileOnly(libs.gson)
     testImplementation(libs.gson)
