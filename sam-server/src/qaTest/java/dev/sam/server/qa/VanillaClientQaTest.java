@@ -30,6 +30,8 @@ class VanillaClientQaTest {
             var respuesta = leerFrame(socket.getInputStream());
             assertThat(respuesta.id()).isZero();
             assertThat(respuesta.texto()).contains("SAM QA").contains("\"protocol\":" + PROTOCOL_1_21_1);
+            // También en claro: así un cliente SAM sabe que debe conectar por TLS (PROTOCOLO.md 2.4)
+            assertThat(respuesta.texto()).containsPattern("\"sam\":\\{\"v\":\"1\\.0\",\"id\":\"[0-9a-f]{32}\",\"tls\":true\\}");
         }
     }
 

@@ -4,7 +4,8 @@
   "package": "dev.sam.server.mixin",
   "compatibilityLevel": "JAVA_21",
   "server": [
-    "ServerChannelInitializerMixin"
+    "ServerChannelInitializerMixin",
+    "StatusResponseMixin"
   ],
   "injectors": {
     "defaultRequire": 1

@@ -65,13 +65,18 @@ class SamClientTlsQaTest {
     @Test
     void unPingDeEstadoPorTlsVeElServidorYSuIdentidad() throws Exception {
         var observador = new ServerCertificateObserver();
+        String texto;
         try (var conexion = Conexion.abrir(observador)) {
             conexion.enviar(handshake(1), QaWire.STATUS_REQUEST);
             var respuesta = leerFrame(conexion.entrada());
             assertThat(respuesta.id()).isZero();
             assertThat(respuesta.texto()).contains("SAM QA").contains("\"protocol\":" + PROTOCOL_1_21_1);
+            texto = respuesta.texto();
         }
         assertThat(observador.observed()).as("el servidor presentó su identidad SAM").isPresent();
+        // El anuncio de SAM (PROTOCOLO.md 2.4) trae el mismo server_id que el certificado
+        assertThat(texto).contains("\"sam\":{\"v\":\"1.0\",\"id\":\"" + observador.observed().get().serverId().hex()
+            + "\",\"tls\":true}").doesNotContain("\"ws\"");
     }
 
     @Test

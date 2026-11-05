@@ -7,6 +7,7 @@ import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Properties;
 
 import org.slf4j.Logger;
@@ -23,6 +24,7 @@ import dev.sam.common.identity.ServerIdentityBootstrap.Disabled;
 import dev.sam.common.identity.ServerIdentityBootstrap.Ready;
 import dev.sam.common.identity.Wordlist;
 import dev.sam.common.net.IngressPolicy;
+import dev.sam.common.net.StatusAdvert;
 import dev.sam.common.net.IngressPolicy.Action;
 import dev.sam.common.net.IngressPolicy.Transport;
 import dev.sam.common.net.ProtocolDetector.Classification;
@@ -51,6 +53,14 @@ public final class SamServer implements DedicatedServerModInitializer {
      */
     private static volatile Ingress ingress = new Ingress(new IngressPolicy(true, false), IngressRoutes.closing(),
         new ConnectionGuard(ConnectionGuard.DEFAULT_PER_IP, ConnectionGuard.DEFAULT_GLOBAL, address -> false));
+
+    /** Solo con la identidad cargada: anunciar SAM sin poder atender TLS dejaría al cliente sin entrar. */
+    private static volatile Optional<StatusAdvert> statusAdvert = Optional.empty();
+
+    /** El campo sam de la respuesta de estado (PROTOCOLO.md 2.4); lo usa el mixin del estado. */
+    public static Optional<StatusAdvert> statusAdvert() {
+        return statusAdvert;
+    }
 
     /** Lo llama el mixin de ServerConnectionListener al armar cada conexión TCP aceptada. */
     public static void installIngressGate(ChannelPipeline pipeline) {
@@ -113,6 +123,7 @@ public final class SamServer implements DedicatedServerModInitializer {
             // Hasta que exista la auditoría encadenada, los eventos de la entrada van al log
             var realIp = transport.realIp(message -> LOGGER.warn("[auditoría] {}", message));
             ingress = new Ingress(transport.policy(), new SamRoutes(identity, transport.webSocketPath(), realIp), ingress.guard());
+            statusAdvert = Optional.of(new StatusAdvert(identity.serverId()));
             LOGGER.info("Transporte: TCP directo {}, WebSocket {}",
                 transport.policy().decide(Transport.DIRECT_TCP, Classification.TLS) == Action.SAM_TLS ? "sí" : "no",
                 transport.webSocketPath().isPresent()

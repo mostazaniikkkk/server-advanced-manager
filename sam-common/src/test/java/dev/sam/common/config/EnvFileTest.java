@@ -135,7 +135,8 @@ class EnvFileTest {
         Files.writeString(archivo, "SAM_TCP_ENABLED=false\nSAM_WS_ENABLED=true\n");
         var cargado = EnvFile.load(archivo, List.of(), fijo(0));
         assertThat(cargado.created()).isFalse();
-        assertThat(cargado.values()).containsExactlyEntriesOf(Map.of("SAM_TCP_ENABLED", "false", "SAM_WS_ENABLED", "true"));
+        assertThat(cargado.values()).containsExactly(org.assertj.core.api.Assertions.entry("SAM_TCP_ENABLED", "false"),
+            org.assertj.core.api.Assertions.entry("SAM_WS_ENABLED", "true"));
         assertThat(Files.readString(archivo)).isEqualTo("SAM_TCP_ENABLED=false\nSAM_WS_ENABLED=true\n");
     }
 
