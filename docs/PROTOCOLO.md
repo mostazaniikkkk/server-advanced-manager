@@ -581,7 +581,21 @@ Lockfile canónico (no se guarda; se reconstruye al verificar):
 }
 ```
 
-Verificación (servidor al cargar y cliente en cada carga, RN-31): reconstruir el lockfile → comparar `lock_sha256` → verificar la firma con una clave del trust store (servidor) o de la `keylist` (cliente). Cualquier archivo de más, de menos o modificado invalida la firma. Rutas con `..`, absolutas o con caracteres de control → rechazo.
+Verificación (servidor al cargar y cliente en cada carga, RN-31): reconstruir el lockfile → comparar `lock_sha256` → verificar la firma con una clave del trust store (servidor) o de la `keylist` (cliente). Cualquier archivo de más, de menos o modificado invalida la firma.
+
+**Rutas** (`ScriptPath`): mismas reglas que las *resource locations* de Minecraft. Segmentos de `[a-z0-9_.-]` separados por `/`, sin `.` ni `..` como segmento, sin segmentos vacíos ni separador final, hasta 256 caracteres. Solo minúsculas ASCII: así no hay colisiones de mayúsculas en Windows (`Main.lua` vs `main.lua`) ni trucos de Unicode. Cualquier otra ruta → rechazo. Máximo 256 archivos sin contar `signature.json`. Solo se excluye el `signature.json` de la **raíz**; uno en una subcarpeta es un archivo más.
+
+**Vector** (implementación de referencia en Python; fijado en `LockfileTest`), con los archivos `manifest.json` = `{"id":"demo","version":"1.0.0"}\n`, `main.lua` = `print("hola")\n`, `ui/panel.lua` = `return {}\n`, `assets/icono.png` = bytes `00…0f`, `sub/signature.json` = `incluido` y `signature.json` = `ignorado`:
+
+```
+assets/icono.png	be45cb2605bf36bebde684841a28f0fd43c69850a3dce5fedba69928ee3a8991
+main.lua	373de7452fc229c503ef11123bfd815d27ea516f0fe22fab908f4e490d29b09b
+manifest.json	0b81a9cb125c5c2bb94a33e7556417b6530b63c4f5187b02c68fc422231a5e15
+sub/signature.json	d01d3db53ce07cd9972426c565b7b222a18bdc53b0792d8daece9fe798d585d8
+ui/panel.lua	1232d8379de77e154ca533689af2e42629dd7574bda5a0a390799849f07607c3
+```
+
+`lock_sha256` = `e0f67bcd51d697c24ce1826b3b5495f0c62b6e877493ee353005854f7a72f38d`
 
 El `sha256` de `ScriptRef` (5.5) es el `lock_sha256`, y el paquete que se transfiere es un archivo `.zip` **sin compresión** con exactamente los archivos del lockfile más `signature.json`. El cliente lo descomprime en memoria con límites de cantidad de archivos (≤ 256) y de tamaño total.
 
