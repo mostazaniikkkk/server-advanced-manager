@@ -176,6 +176,20 @@ si servers[id] no existe:
 
 > Por qué SPKI y no el certificado: el operador puede reemitir el certificado (por ejemplo, al vencer) con la misma clave sin disparar alertas.
 
+**Normalización de las direcciones** (`ServerAddress`; las claves de `addresses` están siempre en esta forma):
+
+| Regla | Ejemplo |
+|---|---|
+| Host en minúsculas, sin punto final | `Play.Ejemplo.COM.` → `play.ejemplo.com` |
+| Nombres no ASCII en punycode (como vanilla) | `bücher.example` → `xn--bcher-kva.example` |
+| IPv4 sin ceros a la izquierda (se rechazan, por ambigüedad octal) | `01.2.3.4` → error |
+| IPv6 entre corchetes, en forma completa; IPv4 mapeado → IPv4; sin zone ID | `[::1]` → `[0:0:0:0:0:0:0:1]` |
+| **TCP sin puerto ≠ TCP con `:25565`**: sin puerto, vanilla consulta el registro SRV y puede llegar a otro destino | `h.com` y `h.com:25565` son direcciones distintas |
+| WebSocket: se omite el puerto por defecto (80 / 443); ruta vacía = `/`; la ruta distingue mayúsculas | `WSS://h.com:443` → `wss://h.com/` |
+| Se rechazan `usuario@host`, otros esquemas, `?`/`#` en la ruta y hosts de más de 253 caracteres | |
+
+La validación **nunca consulta el DNS**.
+
 ### 3.4 Primera conexión (TOFU)
 
 1. TLS completo con un `TrustManager` que **acepta provisoriamente** y guarda el certificado.

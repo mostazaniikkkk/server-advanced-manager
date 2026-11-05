@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import dev.sam.common.net.ServerAddress;
+
 /**
  * Almacén de pins del cliente (RS-NET-07, PROTOCOLO.md 3.3): decide si se confía en el servidor
  * presentado en cada conexión TLS.
@@ -13,7 +15,7 @@ import java.util.Optional;
  * <p>Inmutable: toda modificación devuelve un almacén nuevo. Invariante: toda dirección apunta a
  * un servidor fijado.
  *
- * <p>Las direcciones se usan como claves opacas: deben llegar ya normalizadas.
+ * <p>Las direcciones son {@link ServerAddress}: normalizadas por construcción.
  */
 public final class PinStore {
 
@@ -58,9 +60,9 @@ public final class PinStore {
     private static final PinStore EMPTY = new PinStore(Map.of(), Map.of());
 
     private final Map<ServerId, PinnedServer> servers;
-    private final Map<String, ServerId> addresses;
+    private final Map<ServerAddress, ServerId> addresses;
 
-    private PinStore(Map<ServerId, PinnedServer> servers, Map<String, ServerId> addresses) {
+    private PinStore(Map<ServerId, PinnedServer> servers, Map<ServerAddress, ServerId> addresses) {
         this.servers = Map.copyOf(servers);
         this.addresses = Map.copyOf(addresses);
     }
@@ -69,14 +71,14 @@ public final class PinStore {
         return EMPTY;
     }
 
-    public Verdict verify(String address, ServerId id, ServerPublicKey key) {
+    public Verdict verify(ServerAddress address, ServerId id, ServerPublicKey key) {
         return verify(address, id, key, List.of());
     }
 
     /**
      * @param rotations declaraciones de rotación que envió el servidor en {@code sam:hello}
      */
-    public Verdict verify(String address, ServerId id, ServerPublicKey key, List<RotationStatement> rotations) {
+    public Verdict verify(ServerAddress address, ServerId id, ServerPublicKey key, List<RotationStatement> rotations) {
         var addressOwner = addresses.get(address);
         if (addressOwner != null && !addressOwner.equals(id)) {
             return new Verdict.IdentityMismatch(addressOwner, id);
@@ -102,7 +104,7 @@ public final class PinStore {
      * @throws IllegalStateException si el server_id ya está fijado con otra clave (usar
      *                               {@link #replaceKey}) o la dirección pertenece a otro servidor
      */
-    public PinStore trust(String address, ServerId id, ServerPublicKey key, String name, Instant firstSeen) {
+    public PinStore trust(ServerAddress address, ServerId id, ServerPublicKey key, String name, Instant firstSeen) {
         var pinned = servers.get(id);
         if (pinned != null && !pinned.key().equals(key)) {
             throw new IllegalStateException(
@@ -117,7 +119,7 @@ public final class PinStore {
     }
 
     /** Asocia otra dirección a un servidor ya fijado (RF-WS-05). */
-    public PinStore addAddress(String address, ServerId id) {
+    public PinStore addAddress(ServerAddress address, ServerId id) {
         if (!servers.containsKey(id)) {
             throw new IllegalArgumentException("El servidor " + id.hex() + " no está fijado");
         }
@@ -150,7 +152,7 @@ public final class PinStore {
         return new PinStore(newServers, newAddresses);
     }
 
-    public boolean isPinned(String address) {
+    public boolean isPinned(ServerAddress address) {
         return addresses.containsKey(address);
     }
 
@@ -158,7 +160,7 @@ public final class PinStore {
         return Optional.ofNullable(servers.get(id));
     }
 
-    private void requireAddressFreeOrOwnedBy(String address, ServerId id) {
+    private void requireAddressFreeOrOwnedBy(ServerAddress address, ServerId id) {
         var owner = addresses.get(address);
         if (owner != null && !owner.equals(id)) {
             throw new IllegalStateException(

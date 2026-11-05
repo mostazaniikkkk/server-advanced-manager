@@ -13,6 +13,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 import dev.sam.common.identity.PinStore.Verdict;
+import dev.sam.common.net.ServerAddress;
 import net.jqwik.api.ForAll;
 import net.jqwik.api.Property;
 import net.jqwik.api.constraints.Size;
@@ -20,13 +21,13 @@ import net.jqwik.api.constraints.Size;
 /**
  * RS-NET-07 / PROTOCOLO.md 3.3 y 3.7: decisión de confianza en cada conexión TLS.
  *
- * <p>Las direcciones llegan ya normalizadas (eso es otra pieza).
+ * <p>Las direcciones son ServerAddress (normalizadas por construcción).
  */
 class PinStoreTest {
 
-    private static final String DIR_TCP = "play.ejemplo.com:25565";
-    private static final String DIR_WS = "wss://mc.ejemplo.com/a1b2c3";
-    private static final String DIR_OTRA = "otro.ejemplo.com:25565";
+    private static final ServerAddress DIR_TCP = ServerAddress.parse("play.ejemplo.com:25565");
+    private static final ServerAddress DIR_WS = ServerAddress.parse("wss://mc.ejemplo.com/a1b2c3");
+    private static final ServerAddress DIR_OTRA = ServerAddress.parse("otro.ejemplo.com:25565");
 
     private static final ServerId ID_A = ServerId.fromHex("00000000000000000000000000000001");
     private static final ServerId ID_B = ServerId.fromHex("0000000000000000000000000000000b");
@@ -94,7 +95,7 @@ class PinStoreTest {
             .trust(DIR_OTRA, ID_B, KEY_2, "Servidor B", T0);
         assertThatThrownBy(() -> store.addAddress(DIR_TCP, ID_B))
             .isInstanceOf(IllegalStateException.class)
-            .hasMessageContaining(DIR_TCP);
+            .hasMessageContaining(DIR_TCP.canonical());
     }
 
     @Test
