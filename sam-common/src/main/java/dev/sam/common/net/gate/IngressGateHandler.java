@@ -1,6 +1,7 @@
 package dev.sam.common.net.gate;
 
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import dev.sam.common.net.IngressPolicy;
 import dev.sam.common.net.IngressPolicy.Transport;
@@ -9,6 +10,7 @@ import dev.sam.common.net.ProtocolDetector.Classification;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.ByteToMessageDecoder;
+import io.netty.util.concurrent.ScheduledFuture;
 
 /**
  * Compuerta de entrada (RS-NET-06, PROTOCOLO.md 2.1): va primera en el pipeline de cada conexión,
@@ -20,11 +22,14 @@ public final class IngressGateHandler extends ByteToMessageDecoder {
 
     public static final String NAME = "sam_gate";
     public static final String VANILLA_GATE_NAME = "sam_vanilla_gate";
+    /** Plazo para clasificar la conexión por sus primeros bytes (PROTOCOLO.md 2.1). */
+    public static final java.time.Duration CLASSIFY_TIMEOUT = java.time.Duration.ofSeconds(5);
 
     private final IngressPolicy policy;
     private final Transport transport;
     private final IngressRoutes routes;
     private final String kickMessage;
+    private ScheduledFuture<?> timeout;
 
     /** @param kickMessage mensaje de la desconexión SAM-K001 para clientes sin SAM */
     public IngressGateHandler(IngressPolicy policy, Transport transport, IngressRoutes routes, String kickMessage) {
@@ -32,6 +37,18 @@ public final class IngressGateHandler extends ByteToMessageDecoder {
         this.transport = transport;
         this.routes = routes;
         this.kickMessage = kickMessage;
+    }
+
+    /** Si en {@link #CLASSIFY_TIMEOUT} no se pudo clasificar, descarta lo recibido y cierra. */
+    @Override
+    public void handlerAdded(ChannelHandlerContext ctx) {
+        timeout = ctx.executor().schedule(() -> close(ctx, internalBuffer()),
+            CLASSIFY_TIMEOUT.toNanos(), TimeUnit.NANOSECONDS);
+    }
+
+    @Override
+    protected void handlerRemoved0(ChannelHandlerContext ctx) {
+        timeout.cancel(false);
     }
 
     @Override

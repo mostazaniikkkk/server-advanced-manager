@@ -47,4 +47,15 @@ class VanillaClientQaTest {
             assertThat(in.read()).as("el servidor cierra la conexión tras el kick").isEqualTo(-1);
         }
     }
+
+    @Test
+    void unaConexionMudaSeCierraALos5Segundos() throws IOException {
+        try (var socket = conectar()) {
+            socket.setSoTimeout(10_000);
+            long inicio = System.nanoTime();
+            assertThat(socket.getInputStream().read()).as("el servidor cierra la conexión muda").isEqualTo(-1);
+            long ms = (System.nanoTime() - inicio) / 1_000_000;
+            assertThat(ms).as("plazo de clasificación (PROTOCOLO.md 2.1)").isBetween(4_500L, 7_000L);
+        }
+    }
 }

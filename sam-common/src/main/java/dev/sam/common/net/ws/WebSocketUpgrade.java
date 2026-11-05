@@ -6,6 +6,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 import dev.sam.common.net.IngressPolicy;
@@ -29,6 +30,7 @@ import io.netty.handler.codec.http.websocketx.WebSocket13FrameDecoder;
 import io.netty.handler.codec.http.websocketx.WebSocket13FrameEncoder;
 import io.netty.handler.codec.http.websocketx.WebSocketDecoderConfig;
 import io.netty.util.ReferenceCountUtil;
+import io.netty.util.concurrent.ScheduledFuture;
 
 /**
  * Handshake HTTP de WebSocket en el mismo puerto (PROTOCOLO.md 2.3, RF-WS-01/02, RS-WS-03/05).
@@ -43,6 +45,8 @@ public final class WebSocketUpgrade {
     public static final String SUBPROTOCOL = "sam.v1";
     /** Petición HTTP completa (línea inicial y cabeceras), RS-WS-03. */
     public static final int MAX_REQUEST_BYTES = 8 * 1024;
+    /** {@code SAM_WS_HANDSHAKE_TIMEOUT} por defecto: desde la compuerta hasta el 101 (RS-WS-03). */
+    public static final java.time.Duration HANDSHAKE_TIMEOUT = java.time.Duration.ofSeconds(5);
 
     public static final String LIMIT_NAME = "sam_ws_limit";
     public static final String HTTP_NAME = "sam_ws_http";
@@ -160,11 +164,28 @@ public final class WebSocketUpgrade {
         private final IngressRoutes routes;
         private String acceptedKey;
         private boolean rejected;
+        private ScheduledFuture<?> timeout;
 
         UpgradeHandler(String path, IngressRoutes routes) {
             this.path = path;
             this.routes = routes;
         }
+
+        @Override
+        public void handlerAdded(ChannelHandlerContext ctx) {
+            // El codec HTTP consume lo que recibe en cuanto llega: al cerrar no le quedan bytes que
+            // reenviar a Minecraft (lo prueban los tests de "nada llega a Minecraft")
+            // Lambda con bloque: un Runnable (sin valor de retorno que nadie lee)
+            timeout = ctx.executor().schedule(() -> {
+                ctx.close();
+            }, HANDSHAKE_TIMEOUT.toNanos(), TimeUnit.NANOSECONDS);
+        }
+
+        @Override
+        public void handlerRemoved(ChannelHandlerContext ctx) {
+            timeout.cancel(false);
+        }
+
 
         @Override
         public void channelRead(ChannelHandlerContext ctx, Object msg) {
