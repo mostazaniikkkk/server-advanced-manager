@@ -2,6 +2,13 @@
 junit = "5.11.3"
 assertj = "3.26.3"
 jqwik = "1.9.1"
+pitestCore = "1.17.0"
+pitestJunit5 = "1.2.1"
+pitestGradle = "1.15.0"
+jacoco = "0.8.12"
+
+[plugins]
+pitest = { id = "info.solidsoft.pitest", version.ref = "pitestGradle" }
 
 [libraries]
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }

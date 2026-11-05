@@ -49,21 +49,26 @@ public final class IngressPolicy {
     }
 
     public Action decide(Transport transport, Classification classification) {
-        if (classification == Classification.NEED_MORE) {
-            return Action.WAIT;
-        }
         return switch (transport) {
-            case INSIDE_WEBSOCKET -> classification == Classification.TLS ? Action.SAM_TLS : Action.CLOSE;
+            case INSIDE_WEBSOCKET -> decideInsideWebSocket(classification);
             case DIRECT_TCP -> decideDirect(classification);
+        };
+    }
+
+    private static Action decideInsideWebSocket(Classification classification) {
+        return switch (classification) {
+            case NEED_MORE -> Action.WAIT;
+            case TLS -> Action.SAM_TLS;
+            case HTTP, LEGACY_PING, VANILLA -> Action.CLOSE;
         };
     }
 
     private Action decideDirect(Classification classification) {
         return switch (classification) {
+            case NEED_MORE -> Action.WAIT;
             case HTTP -> webSocketEnabled ? Action.WEBSOCKET_HANDSHAKE : Action.CLOSE;
             case TLS -> tcpEnabled ? Action.SAM_TLS : Action.CLOSE;
             case LEGACY_PING, VANILLA -> tcpEnabled ? Action.VANILLA_RESTRICTED : Action.CLOSE;
-            case NEED_MORE -> Action.WAIT;
         };
     }
 }

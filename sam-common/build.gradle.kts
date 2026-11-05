@@ -1,5 +1,7 @@
 plugins {
     `java-library`
+    jacoco
+    alias(libs.plugins.pitest)
 }
 
 java {
@@ -30,7 +32,52 @@ tasks.test {
         includeEngines("junit-jupiter", "jqwik")
     }
     testLogging {
-        events("passed", "failed", "skipped")
+        events("failed", "skipped")
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
     }
+    finalizedBy(tasks.jacocoTestReport)
+}
+
+// ===== Cobertura (JaCoCo) =====
+jacoco {
+    toolVersion = libs.versions.jacoco.get()
+}
+
+tasks.jacocoTestReport {
+    dependsOn(tasks.test)
+    reports {
+        xml.required = true
+        html.required = true
+    }
+}
+
+tasks.jacocoTestCoverageVerification {
+    violationRules {
+        rule {
+            limit {
+                counter = "BRANCH"
+                minimum = "0.90".toBigDecimal()
+            }
+            limit {
+                counter = "LINE"
+                minimum = "0.90".toBigDecimal()
+            }
+        }
+    }
+}
+
+// ===== Mutation testing (PIT) =====
+pitest {
+    pitestVersion = libs.versions.pitestCore.get()
+    junit5PluginVersion = libs.versions.pitestJunit5.get()
+    targetClasses = listOf("dev.sam.*")
+    mutators = listOf("STRONGER")
+    threads = 4
+    outputFormats = listOf("HTML", "XML")
+    timestampedReports = false
+    mutationThreshold = 100
+}
+
+tasks.check {
+    dependsOn(tasks.jacocoTestCoverageVerification)
 }

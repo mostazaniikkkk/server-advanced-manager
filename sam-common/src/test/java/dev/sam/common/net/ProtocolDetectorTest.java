@@ -57,6 +57,24 @@ class ProtocolDetectorTest {
     }
 
     @Test
+    void exactamenteLosCuatroBytesDeGetAlcanzanParaDecidir() {
+        // Borde exacto: un cliente que manda "GET " en el primer segmento no debe quedar esperando
+        assertThat(ProtocolDetector.classify(ascii("GET "))).isEqualTo(HTTP);
+    }
+
+    @Test
+    void unSoloByteVanillaSeDecideSinEsperar() {
+        // Un cliente vanilla cuyo primer segmento trae un solo byte no debe quedar colgado
+        assertThat(ProtocolDetector.classify(bytes(0x10))).isEqualTo(VANILLA);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"XET ", "PET ", "gET ", "HET /ruta"})
+    void soloUnaGMayusculaInicialPuedeSerHttp(String entrada) {
+        assertThat(ProtocolDetector.classify(ascii(entrada))).isEqualTo(VANILLA);
+    }
+
+    @Test
     void sinBytesHaceFaltaLeerMas() {
         assertThat(ProtocolDetector.classify(new byte[0])).isEqualTo(NEED_MORE);
     }
