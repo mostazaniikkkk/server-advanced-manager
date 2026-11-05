@@ -20,6 +20,15 @@ if (Get-NetTCPConnection -LocalPort 25567 -State Listen -ErrorAction SilentlyCon
     Write-Output "QA: el puerto 25567 ya está en uso: hay un servidor corriendo. No se arranca otro."; exit 1
 }
 
+# Passphrase de la identidad solo para QA: vive en la carpeta del servidor QA (fuera del repositorio)
+# y llega al proceso como variable de entorno real, como exige RF-CFG-08.
+$passFile = Join-Path $ServerDir ".sam-qa-identity-passphrase"
+if (-not (Test-Path $passFile)) {
+    $bytes = New-Object byte[] 32; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+    [System.IO.File]::WriteAllText($passFile, (($bytes | ForEach-Object { $_.ToString("x2") }) -join ""))
+}
+$env:SAM_IDENTITY_PASSPHRASE = ([System.IO.File]::ReadAllText($passFile)).Trim()
+
 $log = Join-Path $ServerDir "server-run.log"
 $server = Start-Process -FilePath $java -ArgumentList "-Xmx2G", "-jar", "fabric-server-launch.jar", "nogui" -WorkingDirectory $ServerDir `
     -RedirectStandardOutput $log -RedirectStandardError "$log.err" -NoNewWindow -PassThru
@@ -37,7 +46,7 @@ while (((Get-Date) - $start).TotalSeconds -lt 180) {
     if (((Get-Date) - $lastChange).TotalSeconds -ge 60) { $state = "log trabado 60 s"; break }
 }
 Write-Output ("QA: servidor {0} en {1} s" -f $state, [int]((Get-Date) - $start).TotalSeconds)
-Get-Content $log | Where-Object { $_ -match "SAM Server|Loading \d+ mods|Starting Minecraft server on|ERROR" } | Select-Object -First 6
+Get-Content $log -Encoding UTF8 | Where-Object { $_ -match "SAM Server|Identidad del servidor|SAM_IDENTITY|Loading \d+ mods|Starting Minecraft server on|ERROR" } | Select-Object -First 8
 
 $exit = 1
 if ($state -eq "listo") {

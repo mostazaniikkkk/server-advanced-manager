@@ -40,6 +40,8 @@ dependencies {
     "qaTestImplementation"(project(":sam-common"))
     "qaTestImplementation"(libs.netty.buffer)
     "qaTestImplementation"(libs.netty.codec)
+    "qaTestImplementation"(libs.netty.transport)
+    "qaTestImplementation"(libs.netty.handler)
     "qaTestImplementation"(platform(libs.junit.bom))
     "qaTestImplementation"(libs.junit.jupiter)
     "qaTestImplementation"(libs.assertj)

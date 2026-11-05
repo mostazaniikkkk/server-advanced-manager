@@ -3,6 +3,9 @@
 - `qa-run.ps1`: QA de punta a punta. Instala `sam-server` en el servidor QA local, lo arranca, espera
   `Done (` (con corte ante crash o log trabado), corre `gradlew :sam-server:qaTest` y lo detiene por RCON.
   Uso: `powershell -File tools\qa\qa-run.ps1 [-ServerDir <ruta>] [-SkipInstall]`. Deja los logs en `build\qa`.
+  La passphrase de la identidad del servidor QA se genera la primera vez en
+  `<ServerDir>\.sam-qa-identity-passphrase` (fuera del repositorio) y se pasa al proceso como variable de
+  entorno `SAM_IDENTITY_PASSPHRASE` (RF-CFG-08). Es solo para QA: en producción la define el admin.
 - `gradle-watch.ps1`: corre `gradlew` vigilando el log; si deja de avanzar, toma un volcado de hilos
   (`jstack`) del daemon para diagnosticar dónde se trabó.
 - `rcon.ps1`: cliente RCON mínimo; lee puerto y contraseña del `server.properties` del servidor.
