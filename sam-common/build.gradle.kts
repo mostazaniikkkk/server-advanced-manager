@@ -30,6 +30,7 @@ dependencies {
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
     testImplementation(libs.jqwik)
+    testImplementation(libs.jimfs)
     testRuntimeOnly(libs.junit.launcher)
 }
 

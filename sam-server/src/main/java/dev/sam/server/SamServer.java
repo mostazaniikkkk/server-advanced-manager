@@ -1,13 +1,21 @@
 package dev.sam.server;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import dev.sam.common.auth.Argon2Params;
 import dev.sam.common.auth.Argon2id;
+import dev.sam.common.config.EnvFile;
+import dev.sam.common.config.ServerEnv;
 import dev.sam.common.config.TransportConfig;
 import dev.sam.common.identity.ServerFingerprint;
 import dev.sam.common.identity.ServerIdentityBootstrap;
@@ -56,17 +64,45 @@ public final class SamServer implements DedicatedServerModInitializer {
             .map(mod -> mod.getMetadata().getVersion().getFriendlyString())
             .orElse("?");
         LOGGER.info("SAM Server {} cargado. Núcleo: {}", version, coreSmokeCheck());
-        // Hasta el ciclo del .env, el transporte sale de las variables de entorno (RF-CFG-02: tienen prioridad)
         TransportConfig transport;
         try {
-            transport = TransportConfig.from(System.getenv());
-        } catch (IllegalArgumentException e) {
-            LOGGER.error("Configuración de transporte inválida: {}. El login de SAM queda cerrado.", e.getMessage());
+            transport = TransportConfig.from(loadConfig());
+        } catch (IllegalArgumentException | IOException e) {
+            LOGGER.error("Configuración inválida: {}. El login de SAM queda cerrado.", e.getMessage());
             return;
         }
         // Los límites aplican aunque el login de SAM quede cerrado: el vanilla también pasa por la compuerta
         ingress = new Ingress(ingress.policy(), ingress.routes(), transport.guard());
         loadIdentity(transport);
+    }
+
+    /**
+     * El .env (lo genera si falta) más el entorno real del proceso, que gana (RF-CFG-01/02/03). El .env
+     * no puede estar dentro del mundo (RF-CFG-09).
+     */
+    private static Map<String, String> loadConfig() throws IOException {
+        var gameDir = FabricLoader.getInstance().getGameDir();
+        var file = EnvFile.locate(gameDir, System.getenv());
+        var loaded = EnvFile.load(file, List.of(gameDir.resolve(levelName(gameDir))), new SecureRandom());
+        if (loaded.created()) {
+            LOGGER.info("Configuración: se generó {} con valores por defecto (documentado en {})", file, EnvFile.EXAMPLE_NAME);
+        } else {
+            LOGGER.info("Configuración: {} ({} claves)", file, loaded.values().size());
+        }
+        loaded.warnings().forEach(LOGGER::warn);
+        return ServerEnv.merge(loaded.values(), System.getenv());
+    }
+
+    /** La carpeta del mundo según server.properties (por defecto, world). */
+    private static String levelName(Path gameDir) throws IOException {
+        var properties = new Properties();
+        var file = gameDir.resolve("server.properties");
+        if (Files.exists(file)) {
+            try (var in = Files.newInputStream(file)) {
+                properties.load(in);
+            }
+        }
+        return properties.getProperty("level-name", "world");
     }
 
     private static void loadIdentity(TransportConfig transport) {

@@ -32,6 +32,8 @@ $env:SAM_IDENTITY_PASSPHRASE = ([System.IO.File]::ReadAllText($passFile)).Trim()
 $env:SAM_TCP_ENABLED = "true"
 $env:SAM_WS_ENABLED = "true"
 $env:SAM_WS_PATH = "/qa-ws"
+# Para las pruebas que revisan archivos del servidor (no empieza con SAM_: no entra en la configuración)
+$env:QA_SAM_SERVER_DIR = $ServerDir
 
 $log = Join-Path $ServerDir "server-run.log"
 $server = Start-Process -FilePath $java -ArgumentList "-Xmx2G", "-jar", "fabric-server-launch.jar", "nogui" -WorkingDirectory $ServerDir `
@@ -50,7 +52,7 @@ while (((Get-Date) - $start).TotalSeconds -lt 180) {
     if (((Get-Date) - $lastChange).TotalSeconds -ge 60) { $state = "log trabado 60 s"; break }
 }
 Write-Output ("QA: servidor {0} en {1} s" -f $state, [int]((Get-Date) - $start).TotalSeconds)
-Get-Content $log -Encoding UTF8 | Where-Object { $_ -match "SAM Server|Identidad del servidor|Transporte|SAM_IDENTITY|Loading \d+ mods|Starting Minecraft server on|ERROR" } | Select-Object -First 10
+Get-Content $log -Encoding UTF8 | Where-Object { $_ -match "SAM Server|Configuración|Identidad del servidor|Transporte|SAM_IDENTITY|Loading \d+ mods|Starting Minecraft server on|ERROR" } | Select-Object -First 10
 
 $exit = 1
 if ($state -eq "listo") {
