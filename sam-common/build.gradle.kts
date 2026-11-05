@@ -10,9 +10,15 @@ repositories {
 
 dependencies {
     implementation(libs.bouncycastle.prov)
-    // Minecraft trae Gson: se compila contra él pero no se empaqueta
+    // Minecraft trae Gson y Netty 4.1.97: se compila contra ellos pero no se empaquetan
     compileOnly(libs.gson)
     testImplementation(libs.gson)
+    compileOnly(libs.netty.codec)
+    compileOnly(libs.netty.transport)
+    compileOnly(libs.netty.buffer)
+    testImplementation(libs.netty.codec)
+    testImplementation(libs.netty.transport)
+    testImplementation(libs.netty.buffer)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
