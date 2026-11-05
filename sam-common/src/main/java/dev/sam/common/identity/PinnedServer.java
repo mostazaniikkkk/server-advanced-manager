@@ -13,11 +13,18 @@ import java.util.Objects;
  */
 public record PinnedServer(ServerId id, ServerPublicKey key, String name, Instant firstSeen) {
 
+    /** Igual que {@code server_name} en {@code sam:hello} (PROTOCOLO.md 5.1). */
+    public static final int MAX_NAME_LENGTH = 64;
+
     public PinnedServer {
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(firstSeen, "firstSeen");
+        if (name.isEmpty() || name.length() > MAX_NAME_LENGTH || name.codePoints().anyMatch(Character::isISOControl)) {
+            throw new IllegalArgumentException(
+                "El nombre del servidor debe tener entre 1 y " + MAX_NAME_LENGTH + " caracteres, sin caracteres de control");
+        }
     }
 
     public Pin pin() {

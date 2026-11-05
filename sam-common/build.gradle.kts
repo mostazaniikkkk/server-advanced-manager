@@ -16,6 +16,9 @@ repositories {
 
 dependencies {
     implementation(libs.bouncycastle.prov)
+    // Minecraft trae Gson: se compila contra él pero no se empaqueta
+    compileOnly(libs.gson)
+    testImplementation(libs.gson)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)

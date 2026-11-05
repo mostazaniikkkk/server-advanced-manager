@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 import dev.sam.common.net.ServerAddress;
@@ -158,6 +159,44 @@ public final class PinStore {
 
     public Optional<PinnedServer> server(ServerId id) {
         return Optional.ofNullable(servers.get(id));
+    }
+
+    /** Vista inmutable de los servidores fijados. */
+    public Map<ServerId, PinnedServer> servers() {
+        return servers;
+    }
+
+    /** Vista inmutable de las direcciones registradas. */
+    public Map<ServerAddress, ServerId> addresses() {
+        return addresses;
+    }
+
+    /**
+     * Agrega un servidor sin dirección (al cargar {@code pins.json}, si sus direcciones se
+     * descartaron). Si el server_id ya existe, no cambia nada.
+     */
+    PinStore withServer(PinnedServer server) {
+        if (servers.containsKey(server.id())) {
+            return this;
+        }
+        var newServers = new HashMap<>(servers);
+        newServers.put(server.id(), server);
+        return new PinStore(newServers, addresses);
+    }
+
+    @Override
+    public boolean equals(Object other) {
+        return other instanceof PinStore that && servers.equals(that.servers) && addresses.equals(that.addresses);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(servers, addresses);
+    }
+
+    @Override
+    public String toString() {
+        return "PinStore[servers=" + servers.size() + ", addresses=" + addresses.size() + "]";
     }
 
     private void requireAddressFreeOrOwnedBy(ServerAddress address, ServerId id) {

@@ -261,6 +261,33 @@ class PinStoreTest {
         assertThat(store.forget(ID_B).verify(DIR_TCP, ID_A, KEY_1)).isInstanceOf(Verdict.Trusted.class);
     }
 
+    // ===== Igualdad =====
+
+    @Test
+    void dosAlmacenesSonIgualesSoloConLosMismosServidoresYDirecciones() {
+        var base = PinStore.empty().trust(DIR_TCP, ID_A, KEY_1, "Mi Servidor", T0);
+        assertThat(base).isEqualTo(PinStore.empty().trust(DIR_TCP, ID_A, KEY_1, "Mi Servidor", T0))
+            .hasSameHashCodeAs(PinStore.empty().trust(DIR_TCP, ID_A, KEY_1, "Mi Servidor", T0));
+        var otraDireccion = base.addAddress(DIR_WS, ID_A);
+        var otroServidor = base.withServer(new PinnedServer(ID_B, KEY_2, "B", T0));
+        var otraClave = base.replaceKey(ID_A, KEY_2);
+        for (var distinto : List.of(PinStore.empty(), otraDireccion, otroServidor, otraClave)) {
+            assertThat(distinto).isNotEqualTo(base);
+            assertThat(distinto.hashCode()).isNotEqualTo(base.hashCode());
+        }
+        assertThat((Object) base).isNotEqualTo("no es un almacén");
+        assertThat(otraDireccion).hasToString("PinStore[servers=1, addresses=2]");
+    }
+
+    @Test
+    void agregarUnServidorQueYaExisteNoLoReemplaza() {
+        var base = PinStore.empty().trust(DIR_TCP, ID_A, KEY_1, "Mi Servidor", T0);
+        assertThat(base.withServer(new PinnedServer(ID_A, KEY_2, "Impostor", T1))).isSameAs(base);
+        var sinDireccion = PinStore.empty().withServer(new PinnedServer(ID_B, KEY_2, "B", T0));
+        assertThat(sinDireccion.servers()).containsOnlyKeys(ID_B);
+        assertThat(sinDireccion.addresses()).isEmpty();
+    }
+
     // ===== Propiedades =====
 
     @Property(tries = 200)

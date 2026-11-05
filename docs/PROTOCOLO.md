@@ -149,6 +149,7 @@ Almacén del cliente (`config/sam-client/pins.json`):
 
 ```json
 {
+  "version": 1,
   "servers": {
     "<server_id>": { "pin": "<hex>", "spki": "<base64>", "first_seen": "2026-11-04T18:00:00Z", "name": "Mi Servidor" }
   },
@@ -175,6 +176,15 @@ si servers[id] no existe:
 ```
 
 > Por qué SPKI y no el certificado: el operador puede reemitir el certificado (por ejemplo, al vencer) con la misma clave sin disparar alertas.
+
+**Escritura y lectura de `pins.json`** (`PinStoreJson`):
+- La escritura es determinista (servidores por `server_id`, direcciones por forma canónica) y siempre en forma canónica.
+- La lectura usa Gson en modo estricto y por streaming, para detectar claves duplicadas: el árbol de Gson se queda en silencio con la última.
+- **Un archivo dañado o manipulado nunca debilita la protección.** Lo inválido se descarta y se informa al jugador; ese servidor vuelve a la primera conexión:
+  - JSON ilegible, `version` distinta de 1 o claves de primer nivel duplicadas → almacén vacío;
+  - un servidor con el `pin` distinto del SHA-256 de su `spki` (posible manipulación), campos inválidos, faltantes, duplicados o de otro tipo, o con un `server_id` repetido → se descarta junto con sus direcciones;
+  - una dirección que no está en forma canónica, ilegible, repetida o que apunta a un servidor no fijado → se descarta.
+- Los campos desconocidos se ignoran, por compatibilidad futura.
 
 **Normalización de las direcciones** (`ServerAddress`; las claves de `addresses` están siempre en esta forma):
 
