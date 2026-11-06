@@ -115,6 +115,31 @@ class ServerIdentityStoreTest {
     }
 
     @Test
+    void unaClaveYCertificadoQueNoSonDeSamFallaCerradoSinRegenerar() throws Exception {
+        // Un identity.p12 reemplazado por otro PKCS12 válido (clave RSA, sin server_id): se abre, pero no es de SAM
+        var archivo = dir.resolve("identity.p12");
+        var rsa = java.security.KeyPairGenerator.getInstance("RSA");
+        rsa.initialize(2048);
+        var par = rsa.generateKeyPair();
+        var nombre = new org.bouncycastle.asn1.x500.X500Name("CN=otro servidor");
+        var certificado = new org.bouncycastle.cert.jcajce.JcaX509CertificateConverter().getCertificate(
+            new org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder(nombre, java.math.BigInteger.ONE,
+                java.util.Date.from(AHORA), java.util.Date.from(AHORA.plusSeconds(3600)), nombre, par.getPublic())
+                .build(new org.bouncycastle.operator.jcajce.JcaContentSignerBuilder("SHA256withRSA").build(par.getPrivate())));
+        var almacen = KeyStore.getInstance("PKCS12");
+        almacen.load(null, null);
+        almacen.setKeyEntry(ServerIdentityStore.ALIAS, par.getPrivate(), CLAVE.clone(), new java.security.cert.Certificate[] {certificado});
+        try (var out = Files.newOutputStream(archivo)) {
+            almacen.store(out, CLAVE.clone());
+        }
+        var antes = Files.readAllBytes(archivo);
+        assertThatThrownBy(() -> ServerIdentityStore.loadOrCreate(archivo, CLAVE.clone(), new SecureRandom(), AHORA))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessage("identity.p12 no contiene una identidad de servidor válida");
+        assertThat(Files.readAllBytes(archivo)).isEqualTo(antes);
+    }
+
+    @Test
     void unaPassphraseVaciaSeRechaza() {
         assertThatThrownBy(() -> ServerIdentityStore.loadOrCreate(dir.resolve("identity.p12"), new char[0], new SecureRandom(), AHORA))
             .isInstanceOf(IllegalArgumentException.class)

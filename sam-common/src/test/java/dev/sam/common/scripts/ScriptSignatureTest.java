@@ -93,6 +93,15 @@ class ScriptSignatureTest {
             .hasMessageContaining("signature.json");
     }
 
+    @Test
+    void unaFirmaQueNoEsBase64SeRechazaConSuMotivo() {
+        var json = "{\"format\":\"sam-sig-v1\",\"key_id\":\"21fe31dfa154a261\",\"lock_sha256\":"
+            + "\"e0f67bcd51d697c24ce1826b3b5495f0c62b6e877493ee353005854f7a72f38d\",\"signature\":\"@@@@\"}";
+        assertThatThrownBy(() -> ScriptSignature.parse(utf8(json)))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("signature no es base64");
+    }
+
     @ParameterizedTest(name = "rechaza el carácter U+{0}")
     @ValueSource(strings = {"000C", "000B", "0000", "007F", "00A0"})
     void soloAceptaElEspacioEnBlancoDeJsonEntreTokens(String codigo) {
