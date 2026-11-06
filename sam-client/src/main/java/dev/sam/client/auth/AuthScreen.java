@@ -24,6 +24,7 @@ import net.minecraft.client.Screenshot;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.PlayerFaceRenderer;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.Style;
@@ -42,7 +43,8 @@ public final class AuthScreen extends Screen {
     private static final int MAX_PASSWORD = 128;
     private static final int LABEL_GAP = 11;
     private static final int ROW = 33;
-    private static final int HEADER = 46;
+    private static final int AVATAR = 24;
+    private static final int HEADER = 46 + AVATAR + 4;
 
     private static final int WHITE = 0xFFFFFF;
     private static final int GRAY = 0xA0A0A0;
@@ -72,6 +74,9 @@ public final class AuthScreen extends Screen {
     private int panelHeight;
     private int fieldsTop;
     private int ticks;
+    /** Bloq Mayús según la última tecla (GLFW solo lo informa con GLFW_LOCK_KEY_MODS activo). */
+    private boolean capsLock;
+    private int previousLockKeyMods = -1;
 
     /** @param sender la conexión en configuration: para desconectarse desde la pantalla */
     public AuthScreen(Hello hello, String nick, PacketSender sender) {
@@ -110,6 +115,11 @@ public final class AuthScreen extends Screen {
         addRenderableWidget(Button.builder(Component.literal("Salir"), b -> leave())
             .bounds(x + FIELD_WIDTH * 2 / 3 + 2, buttonsY, FIELD_WIDTH / 3 - 2, 20).build());
         setInitialFocus(password);
+        var window = minecraft.getWindow().getWindow();
+        if (previousLockKeyMods < 0) {
+            previousLockKeyMods = GLFW.glfwGetInputMode(window, GLFW.GLFW_LOCK_KEY_MODS);
+            GLFW.glfwSetInputMode(window, GLFW.GLFW_LOCK_KEY_MODS, GLFW.GLFW_TRUE);
+        }
         applyMask();
         refresh();
         devAutofill();
@@ -237,7 +247,32 @@ public final class AuthScreen extends Screen {
     }
 
     @Override
+    public void removed() {
+        if (previousLockKeyMods >= 0) {
+            GLFW.glfwSetInputMode(minecraft.getWindow().getWindow(), GLFW.GLFW_LOCK_KEY_MODS, previousLockKeyMods);
+        }
+        super.removed();
+    }
+
+    private void trackCapsLock(int modifiers) {
+        capsLock = (modifiers & GLFW.GLFW_MOD_CAPS_LOCK) != 0;
+    }
+
+    @Override
+    public boolean charTyped(char character, int modifiers) {
+        trackCapsLock(modifiers);
+        return super.charTyped(character, modifiers);
+    }
+
+    @Override
+    public boolean keyReleased(int key, int scanCode, int modifiers) {
+        trackCapsLock(modifiers);
+        return super.keyReleased(key, scanCode, modifiers);
+    }
+
+    @Override
     public boolean keyPressed(int key, int scanCode, int modifiers) {
+        trackCapsLock(modifiers);
         if ((key == GLFW.GLFW_KEY_ENTER || key == GLFW.GLFW_KEY_KP_ENTER) && submit.active) {
             submit();
             return true;
@@ -269,24 +304,35 @@ public final class AuthScreen extends Screen {
         var center = width / 2;
         var x = (width - FIELD_WIDTH) / 2;
 
-        // Cabecera: dónde estás y qué hacer
+        // Cabecera: quién eres, dónde estás y qué hacer
+        var skin = minecraft.getSkinManager().getInsecureSkin(minecraft.getGameProfile());
+        var avatarTop = panelTop + 8;
+        graphics.fill(center - AVATAR / 2 - 1, avatarTop - 1, center + AVATAR / 2 + 1, avatarTop + AVATAR + 1, 0xFF4A4A55);
+        PlayerFaceRenderer.draw(graphics, skin, center - AVATAR / 2, avatarTop, AVATAR);
+        var headerTop = panelTop + AVATAR + 4;
         graphics.drawCenteredString(font, Component.literal(hello.serverName().isBlank() ? "Servidor" : hello.serverName()),
-            center, panelTop + 8, WHITE);
+            center, headerTop + 8, WHITE);
         var greeting = registering
             ? "Es tu primera vez aquí, " + nick + ". Crea tu cuenta."
             : "Hola de nuevo, " + nick + ". Escribe tu contraseña.";
-        graphics.drawCenteredString(font, Component.literal(greeting), center, panelTop + 20, GRAY);
+        graphics.drawCenteredString(font, Component.literal(greeting), center, headerTop + 20, GRAY);
         var help = registering ? "La usarás cada vez que entres aquí." : "Es la que creaste al registrarte aquí.";
-        graphics.drawCenteredString(font, Component.literal(help), center, panelTop + 31, DARK_GRAY);
+        graphics.drawCenteredString(font, Component.literal(help), center, headerTop + 31, DARK_GRAY);
 
         // Etiquetas de los campos y, a la derecha, su validación en vivo
         var right = x + FIELD_WIDTH;
         graphics.drawString(font, "Contraseña", x, fieldsTop, WHITE);
-        if (registering) {
+        if (capsLock || Boolean.getBoolean("sam.dev.capsLock") && isDev()) {
+            // Va en la línea de la etiqueta, a la derecha: en el registro, en lugar del contador
+            var warning = "⚠ Bloq Mayús activado";
+            graphics.drawString(font, warning, right - font.width(warning), fieldsTop, YELLOW);
+        } else if (registering) {
             var min = hello.policy().minPassword();
             var length = password.getValue().length();
             check(graphics, right, fieldsTop, length == 0, longEnough(),
                 longEnough() ? "✔ " + length + " caracteres" : "mínimo " + min + " (" + length + ")");
+        }
+        if (registering) {
             graphics.drawString(font, "Repite la contraseña", x, fieldsTop + ROW, WHITE);
             check(graphics, right, fieldsTop + ROW, confirm.getValue().isEmpty(), matches(),
                 matches() ? "✔ coinciden" : "✖ no coinciden");

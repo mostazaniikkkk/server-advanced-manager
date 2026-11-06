@@ -12,7 +12,9 @@ param(
     [string]$Screenshot,
     [switch]$WrongPassword,
     # Para la captura: confirmación distinta y correo a medias (muestra la validación en vivo)
-    [switch]$Mismatch
+    [switch]$Mismatch,
+    # Para la captura: muestra el aviso de Bloq Mayús
+    [switch]$CapsLock
 )
 
 New-Item -ItemType Directory -Force $Out | Out-Null
@@ -62,6 +64,7 @@ if ($ready) {
         elseif ($Mismatch) { $extra = "-PsamDevScreenshot=$Screenshot -PsamDevFillOnly=true -PsamDevConfirm=otra -PsamDevEmail=$($User.ToLower())@" }
         else { $extra = "-PsamDevScreenshot=$Screenshot -PsamDevFillOnly=true -PsamDevEmail=$($User.ToLower())@example.com" }
     }
+    if ($CapsLock) { $extra += " -PsamDevCapsLock=true" }
     & "$Tools\gradle-watch.ps1" -ProjectDir $ProjectDir -GradleArgs ":sam-client:runClient --console=plain -PsamDevServer=127.0.0.1:25567 -PsamDevUser=$User -PsamDevPassword=$password $extra" -Log "$Out\client.log" -StallSeconds 240 -MaxMinutes 10 | Out-Null
     Get-Content "$Out\client.log" -Encoding UTF8 | Where-Object { $_ -match "\[SAM\]|SAM Client|\[dev\]|Primera conexión|SAM-C|TLS de SAM|Exception|ERROR|Connecting to|Disconnect|BUILD" -and $_ -notmatch "sam.dev.password" } | Select-Object -First 30 | ForEach-Object { "CLIENTE: $_" }
 }
