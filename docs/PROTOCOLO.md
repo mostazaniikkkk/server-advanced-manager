@@ -335,6 +335,7 @@ C → S  sam:hello_ack
 
 - `account_state` revela si el nick está registrado: es inherente al flujo (R-ACC-02).
 - Si el cliente no responde en 10 s → `SAM-K003`.
+- **Estado de la implementación:** `rotation` todavía no viaja; se agrega junto con la rotación del certificado (RS-NET-03). Hasta la primera release, el formato puede cambiar sin subir la versión.
 
 ### 5.2 Dispositivo
 

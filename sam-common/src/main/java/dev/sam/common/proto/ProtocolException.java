@@ -22,6 +22,18 @@ public final class ProtocolException extends RuntimeException {
         return new ProtocolException(MALFORMED, message);
     }
 
+    /**
+     * Construye lo leído: si el valor no cumple sus reglas ({@link IllegalArgumentException} del
+     * constructor), el mensaje es mal formado, con el mismo detalle.
+     */
+    public static <T> T fromRead(java.util.function.Supplier<T> value) {
+        try {
+            return value.get();
+        } catch (IllegalArgumentException e) {
+            throw malformed(e.getMessage());
+        }
+    }
+
     public String code() {
         return code;
     }
