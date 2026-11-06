@@ -41,7 +41,8 @@ tasks.processResources {
 // ===== Prueba de punta a punta en el entorno de desarrollo (solo a pedido) =====
 // gradlew :sam-client:runClient -PsamDevServer=127.0.0.1:25567 -PsamDevPassword=... -PsamDevQuitAfterJoin=8
 tasks.named<JavaExec>("runClient") {
-    mapOf("samDevPassword" to "sam.dev.password", "samDevEmail" to "sam.dev.email", "samDevQuitAfterJoin" to "sam.dev.quitAfterJoin")
+    mapOf("samDevPassword" to "sam.dev.password", "samDevEmail" to "sam.dev.email", "samDevQuitAfterJoin" to "sam.dev.quitAfterJoin",
+        "samDevFillOnly" to "sam.dev.fillOnly", "samDevScreenshot" to "sam.dev.screenshot", "samDevScreenshotDelay" to "sam.dev.screenshotDelay")
         .forEach { (property, key) -> (findProperty(property) as String?)?.let { systemProperty(key, it) } }
     (findProperty("samDevServer") as String?)?.let { args("--quickPlayMultiplayer", it) }
     (findProperty("samDevUser") as String?)?.let { args("--username", it) }

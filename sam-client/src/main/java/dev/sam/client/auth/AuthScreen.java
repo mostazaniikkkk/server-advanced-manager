@@ -78,7 +78,7 @@ public final class AuthScreen extends Screen {
      */
     private void devAutofill() {
         var devPassword = System.getProperty("sam.dev.password");
-        if (!net.fabricmc.loader.api.FabricLoader.getInstance().isDevelopmentEnvironment() || devPassword == null || busy) {
+        if (!isDev() || devPassword == null || busy) {
             return;
         }
         password.setValue(devPassword);
@@ -86,7 +86,34 @@ public final class AuthScreen extends Screen {
             confirm.setValue(devPassword);
             email.setValue(System.getProperty("sam.dev.email", "dev@example.com"));
         }
-        submit();
+        // sam.dev.fillOnly: deja la pantalla rellena sin enviar (para la captura)
+        if (!Boolean.getBoolean("sam.dev.fillOnly")) {
+            submit();
+        }
+    }
+
+    private static boolean isDev() {
+        return net.fabricmc.loader.api.FabricLoader.getInstance().isDevelopmentEnvironment();
+    }
+
+    private int ticks;
+
+    /**
+     * Solo en desarrollo: {@code -Dsam.dev.screenshot=nombre} guarda una captura de esta pantalla a los
+     * {@code sam.dev.screenshotDelay} ticks (30 por defecto) y cierra el juego.
+     */
+    @Override
+    public void tick() {
+        super.tick();
+        var name = System.getProperty("sam.dev.screenshot");
+        if (!isDev() || name == null) {
+            return;
+        }
+        if (++ticks == Integer.getInteger("sam.dev.screenshotDelay", 30)) {
+            net.minecraft.client.Screenshot.grab(minecraft.gameDirectory, name + ".png", minecraft.getMainRenderTarget(),
+                message -> dev.sam.client.SamClient.LOGGER.info("[dev] Captura: {}", message.getString()));
+            minecraft.execute(minecraft::stop);
+        }
     }
 
     private EditBox masked(int x, int y, String hint) {

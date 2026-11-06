@@ -7,7 +7,10 @@ param(
     [string]$Tools = $PSScriptRoot,
     [string]$Out = (Join-Path $PSScriptRoot "..\..\build\qa"),
     [string]$User = "SamDev",
-    [switch]$SkipInstall
+    [switch]$SkipInstall,
+    # Captura de la AuthScreen: rellena (sin enviar, salvo -WrongPassword), guarda la captura y cierra
+    [string]$Screenshot,
+    [switch]$WrongPassword
 )
 
 New-Item -ItemType Directory -Force $Out | Out-Null
@@ -51,7 +54,12 @@ if ($ready) {
     $lines += "onboardAccessibility:false", "skipMultiplayerWarning:true", "joinedFirstServer:true"
     New-Item -ItemType Directory -Force (Split-Path $options) | Out-Null
     Set-Content -Path $options -Value $lines -Encoding ASCII
-    & "$Tools\gradle-watch.ps1" -ProjectDir $ProjectDir -GradleArgs ":sam-client:runClient --console=plain -PsamDevServer=127.0.0.1:25567 -PsamDevUser=$User -PsamDevPassword=$password -PsamDevQuitAfterJoin=6" -Log "$Out\client.log" -StallSeconds 240 -MaxMinutes 10 | Out-Null
+    $extra = "-PsamDevQuitAfterJoin=6"
+    if ($Screenshot) {
+        if ($WrongPassword) { $password = "otra-contrasena-mala"; $extra = "-PsamDevScreenshot=$Screenshot -PsamDevScreenshotDelay=120" }
+        else { $extra = "-PsamDevScreenshot=$Screenshot -PsamDevFillOnly=true -PsamDevEmail=$($User.ToLower())@example.com" }
+    }
+    & "$Tools\gradle-watch.ps1" -ProjectDir $ProjectDir -GradleArgs ":sam-client:runClient --console=plain -PsamDevServer=127.0.0.1:25567 -PsamDevUser=$User -PsamDevPassword=$password $extra" -Log "$Out\client.log" -StallSeconds 240 -MaxMinutes 10 | Out-Null
     Get-Content "$Out\client.log" -Encoding UTF8 | Where-Object { $_ -match "\[SAM\]|SAM Client|\[dev\]|Primera conexión|SAM-C|TLS de SAM|Exception|ERROR|Connecting to|Disconnect|BUILD" -and $_ -notmatch "sam.dev.password" } | Select-Object -First 30 | ForEach-Object { "CLIENTE: $_" }
 }
 Get-Content $log -Encoding UTF8 | Where-Object { $_ -match "auditoría|joined the game|lost connection|left the game|Login de SAM|Exception|ERROR" } | Select-Object -First 20 | ForEach-Object { "SERVIDOR: $_" }
