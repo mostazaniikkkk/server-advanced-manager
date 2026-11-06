@@ -34,9 +34,12 @@ class StatusProbeTest {
                     var entrada = socket.getInputStream();
                     var leido = new java.io.ByteArrayOutputStream();
                     var buf = new byte[256];
-                    // Handshake + status request llegan juntos y cortos
-                    var n = entrada.read(buf);
-                    leido.write(buf, 0, Math.max(n, 0));
+                    // Handshake y status request pueden llegar en segmentos distintos: se lee hasta la petición [1, 0]
+                    int n;
+                    do {
+                        n = entrada.read(buf);
+                        leido.write(buf, 0, Math.max(n, 0));
+                    } while (n > 0 && !terminaConPeticion(leido.toByteArray()));
                     var salida = respuesta.apply(leido.toByteArray());
                     if (salida != null) {
                         socket.getOutputStream().write(salida);
@@ -52,6 +55,10 @@ class StatusProbeTest {
             recibido.get(5, TimeUnit.SECONDS);
             return resultado;
         }
+    }
+
+    private static boolean terminaConPeticion(byte[] leido) {
+        return leido.length > 2 && leido[leido.length - 2] == 0x01 && leido[leido.length - 1] == 0x00;
     }
 
     static byte[] respuestaDeEstado(String json) {
