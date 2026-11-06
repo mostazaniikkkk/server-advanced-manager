@@ -63,6 +63,17 @@ class SamRoutesTest {
     }
 
     @Test
+    void conLaAutenticacionDisponibleElLoginPorTlsLlegaAMinecraft() {
+        var conexion = new Conexion(new SamRoutes(identidad, Optional.empty(), dev.sam.common.net.ip.RealIpResolver.direct(), true));
+        assertThat(conexion.handshakeTls()).isTrue();
+        conexion.enviar(HANDSHAKE_LOGIN);
+        assertThat(conexion.minecraft.bytes()).isEqualTo(HANDSHAKE_LOGIN);
+        assertThat(conexion.servidor.isOpen()).isTrue();
+        assertThat(conexion.servidor.pipeline().names()).doesNotContain(IngressGateHandler.VANILLA_GATE_NAME)
+            .containsSubsequence(SamRoutes.TLS_NAME, SamRoutes.ALPN_GUARD_NAME, "minecraft");
+    }
+
+    @Test
     void elMensajeDeLoginNoDisponibleLlevaSuCodigo() {
         assertThat(SamRoutes.LOGIN_UNAVAILABLE).contains("SAM-K006");
     }
@@ -94,8 +105,11 @@ class SamRoutesTest {
         final EmbeddedChannel cliente;
 
         Conexion() {
-            IngressGate.install(servidor.pipeline(), new IngressPolicy(true, false), Transport.DIRECT_TCP,
-                new SamRoutes(identidad, Optional.empty()), "kick vanilla");
+            this(new SamRoutes(identidad, Optional.empty()));
+        }
+
+        Conexion(SamRoutes rutas) {
+            IngressGate.install(servidor.pipeline(), new IngressPolicy(true, false), Transport.DIRECT_TCP, rutas, "kick vanilla");
             servidor.pipeline().addLast("minecraft", minecraft);
             SSLEngine engine = SamTls.clientEngine(new ServerCertificateObserver(), "127.0.0.1", 25567);
             tlsCliente = new SslHandler(engine);

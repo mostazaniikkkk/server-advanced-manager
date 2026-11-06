@@ -25,6 +25,7 @@ public final class SamRoutes implements IngressRoutes {
     private final ServerIdentity identity;
     private final Optional<String> webSocketPath;
     private final RealIpResolver realIp;
+    private final boolean loginOpen;
 
     /**
      * @param webSocketPath {@code SAM_WS_PATH}; vacío si el WebSocket no está configurado
@@ -36,9 +37,18 @@ public final class SamRoutes implements IngressRoutes {
 
     /** @param realIp de dónde sale la IP del cliente en el handshake WebSocket (RS-WS-02) */
     public SamRoutes(ServerIdentity identity, Optional<String> webSocketPath, RealIpResolver realIp) {
+        this(identity, webSocketPath, realIp, false);
+    }
+
+    /**
+     * @param loginOpen {@code true} si la autenticación de SAM está lista: el login por TLS pasa a
+     *        Minecraft, que lo retiene en la fase de configuration hasta autenticarse
+     */
+    public SamRoutes(ServerIdentity identity, Optional<String> webSocketPath, RealIpResolver realIp, boolean loginOpen) {
         this.identity = identity;
         this.webSocketPath = webSocketPath.map(WebSocketUpgrade::validatePath);
         this.realIp = realIp;
+        this.loginOpen = loginOpen;
     }
 
     @Override
@@ -46,7 +56,9 @@ public final class SamRoutes implements IngressRoutes {
         var handlers = SamTls.serverHandlers(identity);
         var pipeline = gate.pipeline();
         // En orden inverso, todos inmediatamente después de la compuerta
-        pipeline.addAfter(gate.name(), IngressGateHandler.VANILLA_GATE_NAME, new VanillaLoginGate(LOGIN_UNAVAILABLE));
+        if (!loginOpen) {
+            pipeline.addAfter(gate.name(), IngressGateHandler.VANILLA_GATE_NAME, new VanillaLoginGate(LOGIN_UNAVAILABLE));
+        }
         pipeline.addAfter(gate.name(), ALPN_GUARD_NAME, handlers[1]);
         pipeline.addAfter(gate.name(), TLS_NAME, handlers[0]);
         return true;
