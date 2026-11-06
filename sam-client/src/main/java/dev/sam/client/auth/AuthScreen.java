@@ -1,18 +1,26 @@
 package dev.sam.client.auth;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.regex.Pattern;
 
-import dev.sam.common.auth.PasswordDerivation;
+import org.lwjgl.glfw.GLFW;
+
+import dev.sam.client.SamClient;
 import dev.sam.client.net.SamClientNet;
+import dev.sam.common.auth.PasswordDerivation;
 import dev.sam.common.proto.auth.AccountState;
 import dev.sam.common.proto.auth.AuthResult;
 import dev.sam.common.proto.auth.Hello;
 import dev.sam.common.proto.auth.LoginPassword;
 import dev.sam.common.proto.auth.Register;
 import net.fabricmc.fabric.api.networking.v1.PacketSender;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.Util;
+import net.minecraft.client.Screenshot;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
@@ -23,12 +31,29 @@ import net.minecraft.util.FormattedCharSequence;
 
 /**
  * La AuthScreen del MVP (RF-AUTH-01, PROTOCOLO.md 5.3 y 6.1): registro (contraseña, confirmación y
- * correo) o login con contraseña. K se deriva fuera del hilo de render, se envía y se borra.
+ * correo) o login con contraseña. La pantalla explica qué pasa, valida en vivo y solo deja enviar
+ * lo que el servidor va a aceptar. K se deriva fuera del hilo de render, se envía y se borra.
  */
 public final class AuthScreen extends Screen {
 
-    private static final int WIDTH = 220;
+    private static final int PANEL_WIDTH = 280;
+    private static final int FIELD_WIDTH = 240;
+    private static final int TOGGLE_WIDTH = 46;
     private static final int MAX_PASSWORD = 128;
+    private static final int LABEL_GAP = 11;
+    private static final int ROW = 33;
+    private static final int HEADER = 46;
+
+    private static final int WHITE = 0xFFFFFF;
+    private static final int GRAY = 0xA0A0A0;
+    private static final int DARK_GRAY = 0x707070;
+    private static final int GREEN = 0x55FF55;
+    private static final int RED = 0xFF5555;
+    private static final int YELLOW = 0xFFDD55;
+
+    private static final Pattern EMAIL = Pattern.compile("[^@\\s]+@[^@\\s.]+(\\.[^@\\s.]+)+");
+
+    private enum Tone { INFO, BUSY, ERROR, OK }
 
     private final Hello hello;
     private final String nick;
@@ -38,8 +63,15 @@ public final class AuthScreen extends Screen {
     private EditBox confirm;
     private EditBox email;
     private Button submit;
-    private Component status = Component.empty();
+    private Button toggle;
+    private boolean visible;
     private boolean busy;
+    private Component status = Component.empty();
+    private Tone tone = Tone.INFO;
+    private int panelTop;
+    private int panelHeight;
+    private int fieldsTop;
+    private int ticks;
 
     /** @param sender la conexión en configuration: para desconectarse desde la pantalla */
     public AuthScreen(Hello hello, String nick, PacketSender sender) {
@@ -52,103 +84,110 @@ public final class AuthScreen extends Screen {
 
     @Override
     protected void init() {
-        var x = (width - WIDTH) / 2;
-        var y = height / 2 - (registering ? 60 : 30);
-        password = masked(x, y, "Contraseña");
+        // Alto del panel: cabecera, campos (con su validación en la misma línea de la etiqueta),
+        // botones, estado y pie. Cabe en la ventana por defecto (854×480 a escala automática).
+        var rows = registering ? 3 : 1;
+        panelHeight = HEADER + rows * ROW + 2 + 20 + 30;
+        panelTop = Math.max(4, (height - panelHeight) / 2);
+        fieldsTop = panelTop + HEADER;
+        var x = (width - FIELD_WIDTH) / 2;
+
+        var y = fieldsTop + LABEL_GAP;
+        password = masked(x, y, FIELD_WIDTH - TOGGLE_WIDTH - 4, "Tu contraseña");
+        toggle = addRenderableWidget(Button.builder(Component.literal("Ver"), b -> toggleVisible())
+            .bounds(x + FIELD_WIDTH - TOGGLE_WIDTH, y, TOGGLE_WIDTH, 20).build());
         if (registering) {
-            confirm = masked(x, y + 30, "Repite la contraseña");
-            email = new EditBox(font, x, y + 60, WIDTH, 20, Component.literal("Correo"));
+            confirm = masked(x, y + ROW, FIELD_WIDTH, "Escríbela otra vez");
+            email = new EditBox(font, x, y + 2 * ROW, FIELD_WIDTH, 20, Component.literal("Correo"));
             email.setMaxLength(254);
-            email.setHint(Component.literal("Correo electrónico"));
+            email.setHint(Component.literal("tucorreo@ejemplo.com").withStyle(s -> s.withColor(DARK_GRAY)));
+            email.setResponder(text -> refresh());
             addRenderableWidget(email);
         }
-        var buttonsY = y + (registering ? 95 : 35);
-        submit = addRenderableWidget(Button.builder(Component.literal(registering ? "Registrarme" : "Entrar"), b -> submit())
-            .bounds(x, buttonsY, WIDTH / 2 - 2, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("Desconectar"), b -> disconnect())
-            .bounds(x + WIDTH / 2 + 2, buttonsY, WIDTH / 2 - 2, 20).build());
+        var buttonsY = fieldsTop + rows * ROW + 2;
+        submit = addRenderableWidget(Button.builder(Component.literal(registering ? "Crear cuenta y entrar" : "Entrar"),
+            b -> submit()).bounds(x, buttonsY, FIELD_WIDTH * 2 / 3 - 2, 20).build());
+        addRenderableWidget(Button.builder(Component.literal("Salir"), b -> leave())
+            .bounds(x + FIELD_WIDTH * 2 / 3 + 2, buttonsY, FIELD_WIDTH / 3 - 2, 20).build());
         setInitialFocus(password);
-        submit.active = !busy;
+        applyMask();
+        refresh();
         devAutofill();
     }
 
-    /**
-     * Solo en el entorno de desarrollo de Loom (nunca en el jar publicado): {@code -Dsam.dev.password}
-     * rellena y envía la pantalla, para la prueba de punta a punta automática.
-     */
-    private void devAutofill() {
-        var devPassword = System.getProperty("sam.dev.password");
-        if (!isDev() || devPassword == null || busy) {
-            return;
-        }
-        password.setValue(devPassword);
-        if (registering) {
-            confirm.setValue(devPassword);
-            email.setValue(System.getProperty("sam.dev.email", "dev@example.com"));
-        }
-        // sam.dev.fillOnly: deja la pantalla rellena sin enviar (para la captura)
-        if (!Boolean.getBoolean("sam.dev.fillOnly")) {
-            submit();
-        }
-    }
-
-    private static boolean isDev() {
-        return net.fabricmc.loader.api.FabricLoader.getInstance().isDevelopmentEnvironment();
-    }
-
-    private int ticks;
-
-    /**
-     * Solo en desarrollo: {@code -Dsam.dev.screenshot=nombre} guarda una captura de esta pantalla a los
-     * {@code sam.dev.screenshotDelay} ticks (30 por defecto) y cierra el juego.
-     */
-    @Override
-    public void tick() {
-        super.tick();
-        var name = System.getProperty("sam.dev.screenshot");
-        if (!isDev() || name == null) {
-            return;
-        }
-        if (++ticks == Integer.getInteger("sam.dev.screenshotDelay", 30)) {
-            net.minecraft.client.Screenshot.grab(minecraft.gameDirectory, name + ".png", minecraft.getMainRenderTarget(),
-                message -> dev.sam.client.SamClient.LOGGER.info("[dev] Captura: {}", message.getString()));
-            minecraft.execute(minecraft::stop);
-        }
-    }
-
-    private EditBox masked(int x, int y, String hint) {
-        var box = new EditBox(font, x, y, WIDTH, 20, Component.literal(hint));
+    private EditBox masked(int x, int y, int width, String hint) {
+        var box = new EditBox(font, x, y, width, 20, Component.literal(hint));
         box.setMaxLength(MAX_PASSWORD);
-        box.setHint(Component.literal(hint));
-        box.setFormatter((text, start) -> FormattedCharSequence.forward("•".repeat(text.length()), Style.EMPTY));
+        box.setHint(Component.literal(hint).withStyle(s -> s.withColor(DARK_GRAY)));
+        box.setResponder(text -> refresh());
         return addRenderableWidget(box);
     }
 
+    private void toggleVisible() {
+        visible = !visible;
+        toggle.setMessage(Component.literal(visible ? "Ocultar" : "Ver"));
+        applyMask();
+    }
+
+    private void applyMask() {
+        for (var box : passwordBoxes()) {
+            if (visible) {
+                box.setFormatter((text, start) -> FormattedCharSequence.forward(text, Style.EMPTY));
+            } else {
+                box.setFormatter((text, start) -> FormattedCharSequence.forward("*".repeat(text.length()), Style.EMPTY));
+            }
+        }
+    }
+
+    private List<EditBox> passwordBoxes() {
+        var boxes = new ArrayList<EditBox>();
+        boxes.add(password);
+        if (confirm != null) {
+            boxes.add(confirm);
+        }
+        return boxes;
+    }
+
+    // ===== Validación en vivo =====
+
+    private boolean longEnough() {
+        return password.getValue().length() >= hello.policy().minPassword();
+    }
+
+    private boolean matches() {
+        return !confirm.getValue().isEmpty() && confirm.getValue().equals(password.getValue());
+    }
+
+    private boolean validEmail() {
+        return EMAIL.matcher(email.getValue().strip()).matches();
+    }
+
+    private boolean ready() {
+        if (registering) {
+            return longEnough() && matches() && validEmail();
+        }
+        return !password.getValue().isEmpty();
+    }
+
+    private void refresh() {
+        if (submit != null) {
+            submit.active = !busy && ready();
+        }
+    }
+
+    // ===== Envío =====
+
     private void submit() {
-        if (busy) {
-            return;
-        }
-        var text = password.getValue();
-        if (text.length() < hello.policy().minPassword()) {
-            status = Component.literal("La contraseña debe tener al menos " + hello.policy().minPassword() + " caracteres");
-            return;
-        }
-        if (registering && !text.equals(confirm.getValue())) {
-            status = Component.literal("Las contraseñas no coinciden");
-            return;
-        }
-        var mail = registering ? email.getValue().strip() : "";
-        if (registering && !mail.contains("@")) {
-            status = Component.literal("Escribe un correo válido");
+        if (busy || !ready()) {
             return;
         }
         busy = true;
-        submit.active = false;
-        status = Component.literal("Verificando…");
-        var chars = text.toCharArray();
-        password.setValue("");
-        if (confirm != null) {
-            confirm.setValue("");
+        refresh();
+        setStatus(registering ? "Creando tu cuenta…" : "Comprobando tu contraseña…", Tone.BUSY);
+        var chars = password.getValue().toCharArray();
+        var mail = registering ? email.getValue().strip() : "";
+        for (var box : passwordBoxes()) {
+            box.setValue("");
         }
         var serverId = hello.serverId();
         // Argon2 del cliente (64 MiB) fuera del hilo de render (PROTOCOLO.md 6.1)
@@ -157,7 +196,7 @@ public final class AuthScreen extends Screen {
                 Arrays.fill(chars, '\0');
                 minecraft.execute(() -> {
                     if (error != null) {
-                        fail("No se pudo derivar la clave: " + error.getMessage());
+                        fail("No se pudo preparar la contraseña: " + error.getMessage());
                         return;
                     }
                     try {
@@ -175,32 +214,35 @@ public final class AuthScreen extends Screen {
 
     void onResult(AuthResult result) {
         if (result.status() == AuthResult.Status.OK) {
-            status = Component.literal("Listo. Entrando…");
+            setStatus(registering ? "¡Cuenta creada! Entrando al mundo…" : "¡Listo! Entrando al mundo…", Tone.OK);
             return;
         }
-        fail(result.detail().orElse("No se pudo iniciar sesión"));
+        fail(result.detail().orElse("No se pudo iniciar sesión") + ". Inténtalo de nuevo.");
     }
 
     private void fail(String message) {
         busy = false;
-        submit.active = true;
-        status = Component.literal(message);
+        setStatus(message, Tone.ERROR);
+        refresh();
+        setFocused(password);
     }
 
-    private void disconnect() {
-        sender.disconnect(Component.literal("Saliste del login"));
+    private void setStatus(String message, Tone newTone) {
+        status = Component.literal(message);
+        tone = newTone;
+    }
+
+    private void leave() {
+        sender.disconnect(Component.literal("Saliste antes de iniciar sesión"));
     }
 
     @Override
-    public void render(GuiGraphics graphics, int mouseX, int mouseY, float delta) {
-        super.render(graphics, mouseX, mouseY, delta);
-        var x = width / 2;
-        var top = height / 2 - (registering ? 110 : 80);
-        graphics.drawCenteredString(font, title, x, top, 0xFFFFFF);
-        graphics.drawCenteredString(font, Component.literal(hello.serverName() + " · " + nick), x, top + 14, 0xAAAAAA);
-        SamClientNet.lastFingerprint().ifPresent(fingerprint ->
-            graphics.drawCenteredString(font, Component.literal("Huella: " + fingerprint), x, top + 28, 0x777777));
-        graphics.drawCenteredString(font, status, x, height / 2 + (registering ? 75 : 65), 0xFFDD55);
+    public boolean keyPressed(int key, int scanCode, int modifiers) {
+        if ((key == GLFW.GLFW_KEY_ENTER || key == GLFW.GLFW_KEY_KP_ENTER) && submit.active) {
+            submit();
+            return true;
+        }
+        return super.keyPressed(key, scanCode, modifiers);
     }
 
     @Override
@@ -208,4 +250,115 @@ public final class AuthScreen extends Screen {
         return false;
     }
 
+    // ===== Dibujo =====
+
+    @Override
+    public void renderBackground(GuiGraphics graphics, int mouseX, int mouseY, float delta) {
+        super.renderBackground(graphics, mouseX, mouseY, delta);
+        var left = (width - PANEL_WIDTH) / 2;
+        graphics.fill(left, panelTop, left + PANEL_WIDTH, panelTop + panelHeight, 0xD0101014);
+        graphics.fill(left, panelTop, left + PANEL_WIDTH, panelTop + 1, 0xFF4A4A55);
+        graphics.fill(left, panelTop + panelHeight - 1, left + PANEL_WIDTH, panelTop + panelHeight, 0xFF4A4A55);
+        graphics.fill(left, panelTop, left + 1, panelTop + panelHeight, 0xFF4A4A55);
+        graphics.fill(left + PANEL_WIDTH - 1, panelTop, left + PANEL_WIDTH, panelTop + panelHeight, 0xFF4A4A55);
+    }
+
+    @Override
+    public void render(GuiGraphics graphics, int mouseX, int mouseY, float delta) {
+        super.render(graphics, mouseX, mouseY, delta);
+        var center = width / 2;
+        var x = (width - FIELD_WIDTH) / 2;
+
+        // Cabecera: dónde estás y qué hacer
+        graphics.drawCenteredString(font, Component.literal(hello.serverName().isBlank() ? "Servidor" : hello.serverName()),
+            center, panelTop + 8, WHITE);
+        var greeting = registering
+            ? "Es tu primera vez aquí, " + nick + ". Crea tu cuenta."
+            : "Hola de nuevo, " + nick + ". Escribe tu contraseña.";
+        graphics.drawCenteredString(font, Component.literal(greeting), center, panelTop + 20, GRAY);
+        var help = registering ? "La usarás cada vez que entres aquí." : "Es la que creaste al registrarte aquí.";
+        graphics.drawCenteredString(font, Component.literal(help), center, panelTop + 31, DARK_GRAY);
+
+        // Etiquetas de los campos y, a la derecha, su validación en vivo
+        var right = x + FIELD_WIDTH;
+        graphics.drawString(font, "Contraseña", x, fieldsTop, WHITE);
+        if (registering) {
+            var min = hello.policy().minPassword();
+            var length = password.getValue().length();
+            check(graphics, right, fieldsTop, length == 0, longEnough(),
+                longEnough() ? "✔ " + length + " caracteres" : "mínimo " + min + " (" + length + ")");
+            graphics.drawString(font, "Repite la contraseña", x, fieldsTop + ROW, WHITE);
+            check(graphics, right, fieldsTop + ROW, confirm.getValue().isEmpty(), matches(),
+                matches() ? "✔ coinciden" : "✖ no coinciden");
+            graphics.drawString(font, "Correo de recuperación", x, fieldsTop + 2 * ROW, WHITE);
+            check(graphics, right, fieldsTop + 2 * ROW, email.getValue().isBlank(), validEmail(),
+                validEmail() ? "✔" : "✖ incompleto");
+        }
+
+        // Estado
+        if (!status.getString().isEmpty()) {
+            var dots = tone == Tone.BUSY ? ".".repeat(ticks / 6 % 4) : "";
+            graphics.drawCenteredString(font, Component.literal(status.getString() + dots), center,
+                panelTop + panelHeight - 25, color(tone));
+        }
+
+        // Pie: la identidad verificada del servidor (PROTOCOLO.md 3.5)
+        SamClientNet.lastFingerprint().ifPresent(fingerprint -> graphics.drawCenteredString(font,
+            Component.literal("Servidor verificado · " + fingerprint), center, panelTop + panelHeight - 12,
+            DARK_GRAY));
+    }
+
+    /** Texto alineado a la derecha: gris mientras el campo está vacío, verde o rojo después. */
+    private void check(GuiGraphics graphics, int right, int y, boolean pending, boolean ok, String text) {
+        graphics.drawString(font, text, right - font.width(text), y, pending ? DARK_GRAY : ok ? GREEN : RED);
+    }
+
+    private static int color(Tone tone) {
+        return switch (tone) {
+            case INFO, BUSY -> YELLOW;
+            case ERROR -> RED;
+            case OK -> GREEN;
+        };
+    }
+
+    // ===== Solo en el entorno de desarrollo de Loom (nunca en el jar publicado) =====
+
+    /**
+     * {@code -Dsam.dev.password} rellena la pantalla y la envía (o solo la rellena con
+     * {@code sam.dev.fillOnly}); {@code sam.dev.confirm} y {@code sam.dev.email} cambian esos campos.
+     */
+    private void devAutofill() {
+        var devPassword = System.getProperty("sam.dev.password");
+        if (!isDev() || devPassword == null || busy) {
+            return;
+        }
+        password.setValue(devPassword);
+        if (registering) {
+            confirm.setValue(System.getProperty("sam.dev.confirm", devPassword));
+            email.setValue(System.getProperty("sam.dev.email", "dev@example.com"));
+        }
+        if (!Boolean.getBoolean("sam.dev.fillOnly")) {
+            submit();
+        }
+    }
+
+    /**
+     * {@code -Dsam.dev.screenshot=nombre} guarda una captura de esta pantalla a los
+     * {@code sam.dev.screenshotDelay} ticks (30 por defecto) y cierra el juego.
+     */
+    @Override
+    public void tick() {
+        super.tick();
+        ticks++;
+        var name = System.getProperty("sam.dev.screenshot");
+        if (isDev() && name != null && ticks == Integer.getInteger("sam.dev.screenshotDelay", 30)) {
+            Screenshot.grab(minecraft.gameDirectory, name + ".png", minecraft.getMainRenderTarget(),
+                message -> SamClient.LOGGER.info("[dev] Captura: {}", message.getString()));
+            minecraft.execute(minecraft::stop);
+        }
+    }
+
+    private static boolean isDev() {
+        return FabricLoader.getInstance().isDevelopmentEnvironment();
+    }
 }

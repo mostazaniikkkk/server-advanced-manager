@@ -10,7 +10,9 @@ param(
     [switch]$SkipInstall,
     # Captura de la AuthScreen: rellena (sin enviar, salvo -WrongPassword), guarda la captura y cierra
     [string]$Screenshot,
-    [switch]$WrongPassword
+    [switch]$WrongPassword,
+    # Para la captura: confirmación distinta y correo a medias (muestra la validación en vivo)
+    [switch]$Mismatch
 )
 
 New-Item -ItemType Directory -Force $Out | Out-Null
@@ -57,6 +59,7 @@ if ($ready) {
     $extra = "-PsamDevQuitAfterJoin=6"
     if ($Screenshot) {
         if ($WrongPassword) { $password = "otra-contrasena-mala"; $extra = "-PsamDevScreenshot=$Screenshot -PsamDevScreenshotDelay=120" }
+        elseif ($Mismatch) { $extra = "-PsamDevScreenshot=$Screenshot -PsamDevFillOnly=true -PsamDevConfirm=otra -PsamDevEmail=$($User.ToLower())@" }
         else { $extra = "-PsamDevScreenshot=$Screenshot -PsamDevFillOnly=true -PsamDevEmail=$($User.ToLower())@example.com" }
     }
     & "$Tools\gradle-watch.ps1" -ProjectDir $ProjectDir -GradleArgs ":sam-client:runClient --console=plain -PsamDevServer=127.0.0.1:25567 -PsamDevUser=$User -PsamDevPassword=$password $extra" -Log "$Out\client.log" -StallSeconds 240 -MaxMinutes 10 | Out-Null
