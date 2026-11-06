@@ -5,7 +5,7 @@
   "name": "SAM Server",
   "description": "Server Advanced Manager: autenticación reforzada, conexión cifrada y scripting Lua. Lado servidor.",
   "authors": ["Sergio Valle"],
-  "license": "MIT",
+  "license": "CC0-1.0",
   "environment": "server",
   "entrypoints": {
     "server": ["dev.sam.server.SamServer"]

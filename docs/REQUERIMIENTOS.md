@@ -1,6 +1,6 @@
 # Server Advanced Manager (SAM): planteamiento de requerimientos
 
-> Estado: **v1.1**, 2026-11-04. Alcance cerrado. Incorpora las decisiones de la revisión de amenazas ([AMENAZAS.md](AMENAZAS.md), sección 10) y el transporte WebSocket ([TRANSPORTE_WEBSOCKET.md](TRANSPORTE_WEBSOCKET.md)). Licencia: **MIT**.
+> Estado: **v1.1**, 2026-11-04. Alcance cerrado. Incorpora las decisiones de la revisión de amenazas ([AMENAZAS.md](AMENAZAS.md), sección 10) y el transporte WebSocket ([TRANSPORTE_WEBSOCKET.md](TRANSPORTE_WEBSOCKET.md)). Licencia: **CC0 1.0** (dominio público).
 > Las referencias `RN-xx` y `T-xxx` apuntan a AMENAZAS.md.
 
 ## 1. Visión
@@ -35,7 +35,7 @@ SAM es un mod nativo de **Fabric** que reemplaza a EssentialsX (plugin de Bukkit
 | Autor de scripts | **El operador del servidor** escribe los scripts de cliente y de servidor. No hay scripts de terceros en el modelo de confianza. |
 | Rechazo de scripts | Lo define la configuración de SAM (RS-LUA-05) |
 | Configuración | Archivo **`.env` solo en el servidor** (sección 8), **excepto los dos secretos maestros** (la clave de cifrado de datos y la passphrase del certificado), que vienen de variables de entorno reales del proceso (RF-CFG-08) |
-| Licencia | **MIT** |
+| Licencia | **CC0 1.0 Universal** (dominio público). Las dependencias embebidas en los jars conservan sus propias licencias (BouncyCastle: MIT; Netty: Apache 2.0) |
 
 ## 3. Arquitectura general
 
