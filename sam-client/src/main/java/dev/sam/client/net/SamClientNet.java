@@ -155,21 +155,31 @@ public final class SamClientNet {
     public static void installWebSocket(Channel channel, Plan plan, Runnable resume) {
         var pipeline = channel.pipeline();
         var address = plan.address();
-        pipeline.addFirst(WebSocketClientHandshake.NAME, new WebSocketClientHandshake(hostHeader(address), address.path(),
+        var handshake = new WebSocketClientHandshake(hostHeader(address), address.path(),
             new SecureRandom(), tunnel -> tunnel.pipeline().addAfter(tunnel.name(), TLS_NAME, samTls(channel, plan, resume)),
-            reason -> log.warn("WebSocket con {} rechazado: {}", address, reason)));
-        if (address.transport() == ServerAddress.Transport.WSS) {
-            // TLS normal hacia el CDN: valida su certificado y el nombre (SNI y verificación de host)
-            try {
-                var engine = SslContextBuilder.forClient().build().newEngine(channel.alloc(), address.host(), address.port());
-                var parameters = engine.getSSLParameters();
-                parameters.setEndpointIdentificationAlgorithm("HTTPS");
-                engine.setSSLParameters(parameters);
-                pipeline.addFirst(OUTER_TLS_NAME, new SslHandler(engine));
-            } catch (SSLException e) {
-                log.error("No se pudo preparar el TLS hacia {}: {}", address, e.getMessage());
-                channel.close();
-            }
+            reason -> log.warn("WebSocket con {} rechazado: {}", address, reason));
+        if (address.transport() != ServerAddress.Transport.WSS) {
+            pipeline.addFirst(WebSocketClientHandshake.NAME, handshake);
+            return;
+        }
+        // TLS normal hacia el CDN: valida su certificado y el nombre (SNI y verificación de host). Va
+        // primero: el handshake WebSocket escribe su petición al agregarse y tiene que salir cifrada.
+        try {
+            var engine = SslContextBuilder.forClient().build().newEngine(channel.alloc(), address.host(), address.port());
+            var parameters = engine.getSSLParameters();
+            parameters.setEndpointIdentificationAlgorithm("HTTPS");
+            engine.setSSLParameters(parameters);
+            var outer = new SslHandler(engine);
+            outer.handshakeFuture().addListener(done -> {
+                if (!done.isSuccess()) {
+                    log.warn("TLS hacia {} falló: {}", address, done.cause().toString());
+                }
+            });
+            pipeline.addFirst(OUTER_TLS_NAME, outer);
+            pipeline.addAfter(OUTER_TLS_NAME, WebSocketClientHandshake.NAME, handshake);
+        } catch (SSLException e) {
+            log.error("No se pudo preparar el TLS hacia {}: {}", address, e.getMessage());
+            channel.close();
         }
     }
 
