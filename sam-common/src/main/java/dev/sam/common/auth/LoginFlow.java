@@ -1,0 +1,108 @@
+package dev.sam.common.auth;
+
+import java.util.List;
+import java.util.Optional;
+
+import dev.sam.common.identity.ServerId;
+import dev.sam.common.proto.ProtocolException;
+import dev.sam.common.proto.auth.AuthPolicyView;
+import dev.sam.common.proto.auth.AuthResult;
+import dev.sam.common.proto.auth.AuthResult.Status;
+import dev.sam.common.proto.auth.Hello;
+import dev.sam.common.proto.auth.HelloAck;
+import dev.sam.common.proto.auth.LoginPassword;
+import dev.sam.common.proto.auth.ProtocolVersion;
+import dev.sam.common.proto.auth.Register;
+
+/**
+ * El login de una conexión en la fase de configuration (PROTOCOLO.md 4.4 y 5): HELLO → AUTH → DONE.
+ * Un mensaje fuera de estado es SAM-P002. Tras {@code maxAttempts} intentos fallidos, se expulsa
+ * con SAM-K004. El dispositivo (5.2) y los scripts (5.5) se agregan en sus ciclos.
+ *
+ * <p>Los mensajes de una conexión pueden atenderse en otro hilo (Argon2 no corre en el hilo del
+ * servidor): el estado se sincroniza sobre el flujo.
+ */
+public final class LoginFlow {
+
+    public static final String KICK_INCOMPATIBLE = "Tu SAM Client es incompatible con este servidor. [SAM-K002]";
+    public static final String KICK_TOO_MANY = "Demasiados intentos fallidos. [SAM-K004]";
+
+    /**
+     * Lo que hay que hacer tras un mensaje del cliente.
+     *
+     * @param result respuesta para el cliente, si la hay
+     * @param kick mensaje de desconexión, si hay que expulsar
+     * @param done {@code true} si el login terminó bien: el jugador pasa a jugar
+     */
+    public record Reply(Optional<AuthResult> result, Optional<String> kick, boolean done) {
+    }
+
+    private enum State { NEW, HELLO_SENT, AUTH, DONE, CLOSED }
+
+    private final String nick;
+    private final ServerId serverId;
+    private final String serverName;
+    private final AuthPolicyView policy;
+    private final AccountService accounts;
+    private final int maxAttempts;
+    private State state = State.NEW;
+    private int failures;
+
+    public LoginFlow(String nick, ServerId serverId, String serverName, AuthPolicyView policy, AccountService accounts,
+            int maxAttempts) {
+        this.nick = nick;
+        this.serverId = serverId;
+        this.serverName = serverName;
+        this.policy = policy;
+        this.accounts = accounts;
+        this.maxAttempts = maxAttempts;
+    }
+
+    public synchronized Hello hello() {
+        expect(State.NEW);
+        state = State.HELLO_SENT;
+        return new Hello(ProtocolVersion.CURRENT, serverId, serverName, List.of(), accounts.state(nick), policy);
+    }
+
+    public synchronized Reply onHelloAck(HelloAck ack) {
+        expect(State.HELLO_SENT);
+        if (ack.protocol().major() != ProtocolVersion.CURRENT.major()) {
+            state = State.CLOSED;
+            return new Reply(Optional.empty(), Optional.of(KICK_INCOMPATIBLE), false);
+        }
+        state = State.AUTH;
+        return new Reply(Optional.empty(), Optional.empty(), false);
+    }
+
+    public synchronized Reply onRegister(Register register) {
+        expect(State.AUTH);
+        return conclude(accounts.register(nick, register.k(), register.email()));
+    }
+
+    public synchronized Reply onLogin(LoginPassword login) {
+        expect(State.AUTH);
+        return conclude(accounts.login(nick, login.k()));
+    }
+
+    public synchronized boolean done() {
+        return state == State.DONE;
+    }
+
+    private Reply conclude(AuthResult result) {
+        if (result.status() == Status.OK) {
+            state = State.DONE;
+            return new Reply(Optional.of(result), Optional.empty(), true);
+        }
+        if (++failures >= maxAttempts) {
+            state = State.CLOSED;
+            return new Reply(Optional.of(result), Optional.of(KICK_TOO_MANY), false);
+        }
+        return new Reply(Optional.of(result), Optional.empty(), false);
+    }
+
+    private void expect(State expected) {
+        if (state != expected) {
+            throw new ProtocolException(ProtocolException.OUT_OF_STATE, "mensaje fuera de estado (" + state + ")");
+        }
+    }
+}
