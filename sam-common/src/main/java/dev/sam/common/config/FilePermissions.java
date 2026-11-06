@@ -22,7 +22,7 @@ import java.util.Set;
  * buscar grupos amplios, cualquier lectura permitida a alguien que no sea el dueño, SYSTEM o los
  * administradores (que pueden leer todo de todos modos) cuenta como abierta.
  */
-final class FilePermissions {
+public final class FilePermissions {
 
     /** Nombres (sin dominio) de las cuentas privilegiadas, en los idiomas más comunes. */
     private static final Set<String> PRIVILEGED = Set.of("SYSTEM", "Administrators", "Administradores", "Administrateurs",
@@ -32,7 +32,7 @@ final class FilePermissions {
     }
 
     /** {@code true} si otros usuarios del sistema pueden leerlo. */
-    static boolean readableByOthers(Path file) throws IOException {
+    public static boolean readableByOthers(Path file) throws IOException {
         var posix = Files.getFileAttributeView(file, PosixFileAttributeView.class);
         if (posix != null) {
             var permissions = posix.readAttributes().permissions();
@@ -47,7 +47,7 @@ final class FilePermissions {
     }
 
     /** Solo el dueño puede leerlo y escribirlo. */
-    static void restrictToOwner(Path file) throws IOException {
+    public static void restrictToOwner(Path file) throws IOException {
         var posix = Files.getFileAttributeView(file, PosixFileAttributeView.class);
         if (posix != null) {
             posix.setPermissions(EnumSet.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE));
