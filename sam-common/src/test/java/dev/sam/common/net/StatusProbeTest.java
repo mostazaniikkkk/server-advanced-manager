@@ -140,17 +140,23 @@ class StatusProbeTest {
 
     @Test
     void unServidorQueNoContestaNoTrabaLaConexion() throws Exception {
-        var inicio = System.nanoTime();
+        // El servidor falso calla 3 s; la sonda (tope 300 ms) debe rendirse mucho antes. Se mide solo la sonda.
+        var duracion = new long[1];
         var anuncio = conServidor(r -> {
             try {
-                Thread.sleep(1500);
+                Thread.sleep(3000);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
             return null;
-        }, a -> StatusProbe.probe("h", a, 300));
+        }, a -> {
+            var inicio = System.nanoTime();
+            var resultado = StatusProbe.probe("h", a, 300);
+            duracion[0] = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - inicio);
+            return resultado;
+        });
         assertThat(anuncio).isEmpty();
-        assertThat(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - inicio)).isLessThan(1500 + 1000);
+        assertThat(duracion[0]).isLessThan(1500);
     }
 
     @Test
