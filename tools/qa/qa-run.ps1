@@ -52,7 +52,7 @@ while (((Get-Date) - $start).TotalSeconds -lt 180) {
     if (((Get-Date) - $lastChange).TotalSeconds -ge 60) { $state = "log trabado 60 s"; break }
 }
 Write-Output ("QA: servidor {0} en {1} s" -f $state, [int]((Get-Date) - $start).TotalSeconds)
-Get-Content $log -Encoding UTF8 | Where-Object { $_ -match "SAM Server|Configuración|Identidad del servidor|Transporte|SAM_IDENTITY|Loading \d+ mods|Starting Minecraft server on|ERROR" } | Select-Object -First 10
+Get-Content $log -Encoding UTF8 | Where-Object { $_ -match "SAM Server|Configuración|Identidad del servidor|Transporte|Login de SAM|SAM_IDENTITY|Loading \d+ mods|Starting Minecraft server on|ERROR" } | Select-Object -First 10
 
 $exit = 1
 if ($state -eq "listo") {

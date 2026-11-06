@@ -80,14 +80,11 @@ class SamClientTlsQaTest {
     }
 
     @Test
-    void unLoginPorTlsRecibeSamK006YSeCierra() throws Exception {
+    void unClienteTlsSinLosCanalesDeSamEsExpulsadoConSamK001EnLaConfiguracion() throws Exception {
         try (var conexion = Conexion.abrir(new ServerCertificateObserver())) {
-            conexion.enviar(handshake(2), loginStart("QaSam"));
-            var entrada = conexion.entrada();
-            var respuesta = leerFrame(entrada);
-            assertThat(respuesta.id()).isZero();
-            assertThat(respuesta.texto()).contains("SAM-K006");
-            assertThat(entrada.read()).as("el servidor cierra tras el kick").isEqualTo(-1);
+            // El login de SAM está abierto: el login pasa por TLS hasta configuration, donde SAM pide sus canales
+            var desconexion = QaWire.loginHastaDesconexion(conexion.entrada(), conexion::enviar, "QaSinSam");
+            assertThat(desconexion).contains("SAM-K001");
         }
     }
 

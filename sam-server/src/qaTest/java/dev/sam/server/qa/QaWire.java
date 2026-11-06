@@ -85,4 +85,94 @@ final class QaWire {
         }
         throw new IllegalStateException("VarInt demasiado largo");
     }
+
+    /**
+     * Un login offline de Minecraft 1.21.1 sobre un flujo ya abierto (con compresión si el servidor la
+     * pide), contestando lo justo en login y configuration (plugin, ping, keep-alive), hasta que el
+     * servidor desconecta. Devuelve el texto de la desconexión.
+     */
+    static String loginHastaDesconexion(InputStream in, java.util.function.Consumer<byte[]> enviar, String nick)
+            throws IOException {
+        enviar.accept(handshake(2));
+        enviar.accept(loginStart(nick));
+        var compresion = -1;
+        var configuracion = false;
+        while (true) {
+            var paquete = leerPaquete(in, compresion);
+            var buf = ByteBuffer.wrap(paquete);
+            var id = leerVarInt(buf);
+            if (!configuracion) {
+                switch (id) {
+                    case 0x00 -> {
+                        return new String(paquete, StandardCharsets.UTF_8);
+                    }
+                    case 0x02 -> {
+                        enviar.accept(empaquetar(compresion, Wire.varInt(0x03)));
+                        configuracion = true;
+                    }
+                    case 0x03 -> compresion = leerVarInt(buf);
+                    case 0x04 -> {
+                        var mensaje = leerVarInt(buf);
+                        enviar.accept(empaquetar(compresion, concat(Wire.varInt(0x02), Wire.varInt(mensaje), new byte[] {0})));
+                    }
+                    default -> { }
+                }
+            } else {
+                switch (id) {
+                    case 0x02 -> {
+                        return new String(paquete, StandardCharsets.UTF_8);
+                    }
+                    case 0x04 -> enviar.accept(empaquetar(compresion, concat(Wire.varInt(0x04), resto(buf))));
+                    case 0x05 -> enviar.accept(empaquetar(compresion, concat(Wire.varInt(0x05), resto(buf))));
+                    default -> { }
+                }
+            }
+        }
+    }
+
+    private static byte[] leerPaquete(InputStream in, int compresion) throws IOException {
+        int longitud = leerVarInt(in);
+        var cuerpo = in.readNBytes(longitud);
+        if (cuerpo.length != longitud) {
+            throw new EOFException("frame truncado");
+        }
+        if (compresion < 0) {
+            return cuerpo;
+        }
+        var buf = ByteBuffer.wrap(cuerpo);
+        var largo = leerVarInt(buf);
+        var datos = resto(buf);
+        if (largo == 0) {
+            return datos;
+        }
+        var inflater = new java.util.zip.Inflater();
+        inflater.setInput(datos);
+        var salida = new byte[largo];
+        try {
+            inflater.inflate(salida);
+        } catch (java.util.zip.DataFormatException e) {
+            throw new IOException(e);
+        } finally {
+            inflater.end();
+        }
+        return salida;
+    }
+
+    private static byte[] empaquetar(int compresion, byte[] paquete) {
+        return compresion < 0 ? Wire.frame(paquete) : Wire.frame(concat(Wire.varInt(0), paquete));
+    }
+
+    private static byte[] resto(ByteBuffer buf) {
+        var resto = new byte[buf.remaining()];
+        buf.get(resto);
+        return resto;
+    }
+
+    static byte[] concat(byte[]... partes) {
+        var salida = new java.io.ByteArrayOutputStream();
+        for (var parte : partes) {
+            salida.writeBytes(parte);
+        }
+        return salida.toByteArray();
+    }
 }

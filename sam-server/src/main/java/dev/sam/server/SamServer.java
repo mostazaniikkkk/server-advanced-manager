@@ -1,6 +1,7 @@
 package dev.sam.server;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.SecureRandom;
@@ -13,12 +14,15 @@ import java.util.Properties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import dev.sam.common.auth.AccountService;
+import dev.sam.common.auth.AccountsFile;
 import dev.sam.common.auth.Argon2Params;
 import dev.sam.common.auth.Argon2id;
 import dev.sam.common.config.EnvFile;
 import dev.sam.common.config.ServerEnv;
 import dev.sam.common.config.TransportConfig;
 import dev.sam.common.identity.ServerFingerprint;
+import dev.sam.common.identity.ServerId;
 import dev.sam.common.identity.ServerIdentityBootstrap;
 import dev.sam.common.identity.ServerIdentityBootstrap.Disabled;
 import dev.sam.common.identity.ServerIdentityBootstrap.Ready;
@@ -32,6 +36,10 @@ import dev.sam.common.net.gate.ConnectionGuard;
 import dev.sam.common.net.gate.IngressGate;
 import dev.sam.common.net.gate.IngressRoutes;
 import dev.sam.common.net.gate.SamRoutes;
+import dev.sam.common.proto.auth.AuthMethod;
+import dev.sam.common.proto.auth.AuthPolicyView;
+import dev.sam.common.proto.auth.EmailVerify;
+import dev.sam.server.auth.SamAuth;
 import io.netty.channel.ChannelPipeline;
 import net.fabricmc.api.DedicatedServerModInitializer;
 import net.fabricmc.loader.api.FabricLoader;
@@ -41,6 +49,9 @@ public final class SamServer implements DedicatedServerModInitializer {
 
     public static final String MOD_ID = "sam-server";
     public static final Logger LOGGER = LoggerFactory.getLogger("SAM");
+
+    static final String PASSWORD_MIN_LENGTH = "SAM_PASSWORD_MIN_LENGTH";
+    private static final SamAuth AUTH = new SamAuth(LOGGER);
 
     static final String KICK_MESSAGE = "Este servidor requiere SAM Client para entrar. [SAM-K001]";
 
@@ -74,16 +85,19 @@ public final class SamServer implements DedicatedServerModInitializer {
             .map(mod -> mod.getMetadata().getVersion().getFriendlyString())
             .orElse("?");
         LOGGER.info("SAM Server {} cargado. Núcleo: {}", version, coreSmokeCheck());
+        AUTH.install();
         TransportConfig transport;
+        Map<String, String> config;
         try {
-            transport = TransportConfig.from(loadConfig());
+            config = loadConfig();
+            transport = TransportConfig.from(config);
         } catch (IllegalArgumentException | IOException e) {
             LOGGER.error("Configuración inválida: {}. El login de SAM queda cerrado.", e.getMessage());
             return;
         }
         // Los límites aplican aunque el login de SAM quede cerrado: el vanilla también pasa por la compuerta
         ingress = new Ingress(ingress.policy(), ingress.routes(), transport.guard());
-        loadIdentity(transport);
+        loadIdentity(transport, config);
     }
 
     /**
@@ -115,14 +129,16 @@ public final class SamServer implements DedicatedServerModInitializer {
         return properties.getProperty("level-name", "world");
     }
 
-    private static void loadIdentity(TransportConfig transport) {
+    private static void loadIdentity(TransportConfig transport, Map<String, String> config) {
         var file = FabricLoader.getInstance().getConfigDir().resolve("sam/keys/identity.p12");
         var outcome = ServerIdentityBootstrap.start(System.getenv(), file, new SecureRandom(), Instant.now());
         if (outcome instanceof Ready ready) {
             var identity = ready.identity();
             // Hasta que exista la auditoría encadenada, los eventos de la entrada van al log
             var realIp = transport.realIp(message -> LOGGER.warn("[auditoría] {}", message));
-            ingress = new Ingress(transport.policy(), new SamRoutes(identity, transport.webSocketPath(), realIp), ingress.guard());
+            var loginOpen = startAuth(identity.serverId(), config);
+            ingress = new Ingress(transport.policy(), new SamRoutes(identity, transport.webSocketPath(), realIp, loginOpen),
+                ingress.guard());
             statusAdvert = Optional.of(new StatusAdvert(identity.serverId()));
             LOGGER.info("Transporte: TCP directo {}, WebSocket {}",
                 transport.policy().decide(Transport.DIRECT_TCP, Classification.TLS) == Action.SAM_TLS ? "sí" : "no",
@@ -138,6 +154,32 @@ public final class SamServer implements DedicatedServerModInitializer {
             disabled.suggestedPassphrase().ifPresent(value -> LOGGER.warn(
                 "Valor sugerido para {} (defínelo como variable de entorno del proceso, nunca en el .env): {}",
                 ServerIdentityBootstrap.PASSPHRASE_ENV, value));
+        }
+    }
+
+    /**
+     * Cuentas y política de login (MVP: solo contraseña). Si las cuentas no se pueden leer, el login
+     * queda cerrado: arrancar sin ellas dejaría registrar de nuevo el nick de otro (RF-CFG-04).
+     */
+    private static boolean startAuth(ServerId serverId, Map<String, String> config) {
+        var file = FabricLoader.getInstance().getConfigDir().resolve("sam/accounts.json");
+        try {
+            var minPassword = Integer.parseInt(config.getOrDefault(PASSWORD_MIN_LENGTH, "10").strip());
+            var policy = new AuthPolicyView(List.of(AuthMethod.PASSWORD), false, false, EmailVerify.LATER, minPassword);
+            var accounts = new AccountService(AccountsFile.load(file), Argon2Params.SERVER_DEFAULT, new SecureRandom(),
+                all -> {
+                    try {
+                        AccountsFile.save(file, all);
+                    } catch (IOException e) {
+                        throw new UncheckedIOException("No se pudieron guardar las cuentas en " + file, e);
+                    }
+                });
+            AUTH.activate(new SamAuth.Setup(accounts, serverId, policy));
+            LOGGER.info("Login de SAM abierto: contraseña; {} cuentas en {}", AccountsFile.load(file).size(), file);
+            return true;
+        } catch (IOException | IllegalArgumentException e) {
+            LOGGER.error("Cuentas o política de login inválidas: {}. El login de SAM queda cerrado.", e.getMessage());
+            return false;
         }
     }
 
