@@ -6,7 +6,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Instant;
+import java.security.SecureRandom;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+
+import javax.net.ssl.SSLException;
 
 import org.slf4j.Logger;
 
@@ -19,6 +25,8 @@ import dev.sam.common.net.ServerAddress;
 import dev.sam.common.net.StatusProbe;
 import dev.sam.common.net.tls.SamTls;
 import dev.sam.common.net.tls.ServerCertificateObserver;
+import dev.sam.common.net.ws.WebSocketClientHandshake;
+import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.channel.Channel;
 import io.netty.handler.ssl.SslHandler;
 
@@ -36,8 +44,42 @@ public final class SamClientNet {
     public static final String TLS_NAME = "sam_tls";
     private static final int PROBE_TIMEOUT_MILLIS = 3000;
 
-    /** A dónde va una conexión por TLS. */
+    public static final String OUTER_TLS_NAME = "sam_wss_tls";
+
+    /** A dónde va una conexión por TLS; por WebSocket si la dirección es ws:// o wss://. */
     public record Plan(ServerAddress address, String host, int port) {
+        public boolean webSocket() {
+            return address.transport() != ServerAddress.Transport.TCP;
+        }
+    }
+
+    /** Direcciones ws:// y wss:// que Minecraft ya convirtió a host:puerto, para recuperar ruta y transporte. */
+    private static final Map<String, ServerAddress> WEB_SOCKETS = new ConcurrentHashMap<>();
+
+    /**
+     * Una dirección ws:// o wss:// (PROTOCOLO.md 2.3): Minecraft solo conoce host:puerto, así que la
+     * dirección completa queda registrada para cuando se conecte.
+     */
+    public static Optional<ServerAddress> webSocketAddress(String input) {
+        if (!looksLikeWebSocket(input)) {
+            return Optional.empty();
+        }
+        try {
+            var address = ServerAddress.parse(input);
+            WEB_SOCKETS.put(key(address.host(), address.port()), address);
+            return Optional.of(address);
+        } catch (IllegalArgumentException e) {
+            return Optional.empty();
+        }
+    }
+
+    public static boolean looksLikeWebSocket(String input) {
+        var text = input.strip().toLowerCase(Locale.ROOT);
+        return text.startsWith("ws://") || text.startsWith("wss://");
+    }
+
+    private static String key(String host, int port) {
+        return host.toLowerCase(Locale.ROOT) + ":" + port;
     }
 
     private static Logger log;
@@ -77,6 +119,14 @@ public final class SamClientNet {
     public static void prepare(InetSocketAddress target, Object connection) {
         // getHostString puede traer un nombre inverso (p. ej. de hosts): vale lo que escribió el jugador
         var host = typedHost != null && typedPort == target.getPort() ? typedHost : target.getAddress().getHostAddress();
+        // ws:// o wss://: siempre SAM y siempre TLS por dentro; no hace falta sondear
+        var webSocket = Optional.ofNullable(WEB_SOCKETS.get(key(host, target.getPort())))
+            .or(() -> Optional.ofNullable(WEB_SOCKETS.get(key(target.getHostString(), target.getPort()))));
+        if (webSocket.isPresent()) {
+            var known = webSocket.get();
+            ((SamTlsConnection) connection).sam$setPlan(new Plan(known, known.host(), known.port()));
+            return;
+        }
         ServerAddress address;
         try {
             address = ServerAddress.parse(host + ":" + target.getPort());
@@ -91,12 +141,47 @@ public final class SamClientNet {
 
     /** Al activarse el canal: el TLS va primero, pegado al socket. */
     public static void install(Channel channel, Plan plan) {
-        if (plan == null || channel.pipeline().get(TLS_NAME) != null) {
+        if (plan == null || plan.webSocket() || channel.pipeline().get(TLS_NAME) != null) {
             return;
         }
+        channel.pipeline().addFirst(TLS_NAME, samTls(channel, plan, () -> { }));
+    }
+
+    /**
+     * Por WebSocket (PROTOCOLO.md 2.3): [TLS del CDN si es wss] -> handshake WebSocket -> túnel -> TLS de
+     * SAM. Vanilla queda en espera (su channelActive se retiene) hasta que el TLS de SAM verifica el pin;
+     * entonces resume lo deja seguir.
+     */
+    public static void installWebSocket(Channel channel, Plan plan, Runnable resume) {
+        var pipeline = channel.pipeline();
+        var address = plan.address();
+        pipeline.addFirst(WebSocketClientHandshake.NAME, new WebSocketClientHandshake(hostHeader(address), address.path(),
+            new SecureRandom(), tunnel -> tunnel.pipeline().addAfter(tunnel.name(), TLS_NAME, samTls(channel, plan, resume)),
+            reason -> log.warn("WebSocket con {} rechazado: {}", address, reason)));
+        if (address.transport() == ServerAddress.Transport.WSS) {
+            // TLS normal hacia el CDN: valida su certificado y el nombre (SNI y verificación de host)
+            try {
+                var engine = SslContextBuilder.forClient().build().newEngine(channel.alloc(), address.host(), address.port());
+                var parameters = engine.getSSLParameters();
+                parameters.setEndpointIdentificationAlgorithm("HTTPS");
+                engine.setSSLParameters(parameters);
+                pipeline.addFirst(OUTER_TLS_NAME, new SslHandler(engine));
+            } catch (SSLException e) {
+                log.error("No se pudo preparar el TLS hacia {}: {}", address, e.getMessage());
+                channel.close();
+            }
+        }
+    }
+
+    private static String hostHeader(ServerAddress address) {
+        var defaultPort = address.transport() == ServerAddress.Transport.WSS ? 443 : 80;
+        return address.port() == defaultPort ? address.host() : address.host() + ":" + address.port();
+    }
+
+    /** El TLS de SAM con el pin; tras verificarlo, onTrusted. */
+    private static SslHandler samTls(Channel channel, Plan plan, Runnable onTrusted) {
         var observer = new ServerCertificateObserver();
         var tls = new SslHandler(SamTls.clientEngine(observer, plan.host(), plan.port()));
-        channel.pipeline().addFirst(TLS_NAME, tls);
         tls.handshakeFuture().addListener(done -> {
             if (!done.isSuccess()) {
                 log.warn("TLS de SAM con {} falló: {}", plan.address(), done.cause().toString());
@@ -105,8 +190,11 @@ public final class SamClientNet {
             var observed = observer.observed();
             if (observed.isEmpty() || !accept(plan, observed.get())) {
                 channel.close();
+                return;
             }
+            onTrusted.run();
         });
+        return tls;
     }
 
     public static Optional<ServerId> lastVerified() {

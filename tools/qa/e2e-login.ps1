@@ -7,6 +7,8 @@ param(
     [string]$Tools = $PSScriptRoot,
     [string]$Out = (Join-Path $PSScriptRoot "..\..\build\qa"),
     [string]$User = "SamDev",
+    # Dirección a la que conecta el cliente: host:puerto, o ws://127.0.0.1:25567/qa-ws para el WebSocket
+    [string]$Address = "127.0.0.1:25567",
     [switch]$SkipInstall,
     # Captura de la AuthScreen: rellena (sin enviar, salvo -WrongPassword), guarda la captura y cierra
     [string]$Screenshot,
@@ -65,7 +67,7 @@ if ($ready) {
         else { $extra = "-PsamDevScreenshot=$Screenshot -PsamDevFillOnly=true -PsamDevEmail=$($User.ToLower())@example.com" }
     }
     if ($CapsLock) { $extra += " -PsamDevCapsLock=true" }
-    & "$Tools\gradle-watch.ps1" -ProjectDir $ProjectDir -GradleArgs ":sam-client:runClient --console=plain -PsamDevServer=127.0.0.1:25567 -PsamDevUser=$User -PsamDevPassword=$password $extra" -Log "$Out\client.log" -StallSeconds 240 -MaxMinutes 10 | Out-Null
+    & "$Tools\gradle-watch.ps1" -ProjectDir $ProjectDir -GradleArgs ":sam-client:runClient --console=plain `"-PsamDevServer=$Address`" -PsamDevUser=$User -PsamDevPassword=$password $extra" -Log "$Out\client.log" -StallSeconds 240 -MaxMinutes 10 | Out-Null
     Get-Content "$Out\client.log" -Encoding UTF8 | Where-Object { $_ -match "\[SAM\]|SAM Client|\[dev\]|Primera conexión|SAM-C|TLS de SAM|Exception|ERROR|Connecting to|Disconnect|BUILD" -and $_ -notmatch "sam.dev.password" } | Select-Object -First 30 | ForEach-Object { "CLIENTE: $_" }
 }
 Get-Content $log -Encoding UTF8 | Where-Object { $_ -match "auditoría|joined the game|lost connection|left the game|Login de SAM|Exception|ERROR" } | Select-Object -First 20 | ForEach-Object { "SERVIDOR: $_" }

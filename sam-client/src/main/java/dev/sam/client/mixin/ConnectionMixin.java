@@ -43,6 +43,31 @@ public abstract class ConnectionMixin implements SamTlsConnection {
         SamClientNet.prepare(address, connection);
     }
 
+    @Unique
+    private boolean sam$resumed;
+
+    /**
+     * Por WebSocket, vanilla espera: su channelActive se retiene hasta que el túnel y el TLS de SAM están
+     * listos (antes de eso vanilla no escribe nada: sus acciones quedan en cola sin canal).
+     */
+    @Inject(method = "channelActive", at = @At("HEAD"), cancellable = true)
+    private void sam$holdForWebSocket(ChannelHandlerContext ctx, CallbackInfo ci) {
+        var plan = sam$plan;
+        if (plan == null || !plan.webSocket() || sam$resumed) {
+            return;
+        }
+        ci.cancel();
+        var self = (Connection) (Object) this;
+        SamClientNet.installWebSocket(ctx.channel(), plan, () -> ctx.channel().eventLoop().execute(() -> {
+            sam$resumed = true;
+            try {
+                self.channelActive(ctx);
+            } catch (Exception e) {
+                ctx.fireExceptionCaught(e);
+            }
+        }));
+    }
+
     @Inject(method = "channelActive", at = @At("TAIL"))
     private void sam$installTls(ChannelHandlerContext ctx, CallbackInfo ci) {
         SamClientNet.install(ctx.channel(), sam$plan);
