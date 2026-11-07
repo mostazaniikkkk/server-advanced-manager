@@ -70,7 +70,7 @@ public final class LuaSandbox {
     }
 
     /**
-     * El resultado de ejecutar algo: el primer valor devuelto (como texto) o el error.
+     * El resultado de ejecutar algo: el primer valor devuelto (como texto; vacío si es nil) o el error.
      *
      * @param exceeded el error fue por pasarse del tiempo o de la memoria (RS-LUA-03: se suspende)
      */
@@ -171,8 +171,9 @@ public final class LuaSandbox {
             arm();
             var alarm = WATCHDOG.scheduleAtFixedRate(state::interrupt, CHECK_EVERY_MS, CHECK_EVERY_MS, TimeUnit.MILLISECONDS);
             try {
-                var result = LuaThread.runMain(state, function, args);
-                return Outcome.ok(text(result.first()));
+                var first = LuaThread.runMain(state, function, args).first();
+                // nil (o nada) es "sin valor": un comando sin respuesta, por ejemplo
+                return first.isNil() ? new Outcome(Optional.empty(), Optional.empty(), false) : Outcome.ok(text(first));
             } catch (LuaError e) {
                 // Cobalt ya convierte en LuaError las excepciones Java de la API y el desborde de pila
                 return new Outcome(Optional.empty(), Optional.of(e.getMessage()), exceeded);

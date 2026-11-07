@@ -680,6 +680,9 @@ Lectura estricta como `signature.json`: como mucho 4 KiB, claves desconocidas, d
 | `scheduler` | `sam.after(ticks, fn)` y `sam.every(ticks, fn)`; devuelven un id para `sam.cancel(id)` |
 | `players` | `sam.players()`: lista de `{name, uuid}` de los jugadores en línea |
 | `chat` | `sam.tell(nombre, texto)` y `sam.broadcast(texto)` (texto plano, ≤ 256 caracteres) |
+| `commands` | `sam.command(nombre, fn[, {permission = 0..4}])` registra `/nombre` (RF-LUA-03). Al ejecutarse: `fn(jugador, texto, args)` con el jugador como `{name, uuid}` (o `nil` si es la consola), el texto después del nombre y una lista con sus palabras. Si `fn` devuelve un valor, es la respuesta para quien lo ejecutó |
+
+Reglas de `commands`: nombre `[a-z][a-z0-9_]{0,31}`; `permission` por defecto 0 (cualquier jugador), 2 a 4 para operadores; como mucho 16 por script. No se puede usar un nombre que ya tiene el servidor (vanilla, otros mods, `sam`) ni el de otro script: el registro falla con su motivo. Los comandos se registran al cargar los scripts (inicio y `/reload`); con `/sam scripts reload` un comando que ya no existe responde que no está disponible hasta el próximo `/reload`.
 
 **Vector** (`cryptography` de Python; fijado en `ScriptSignatureTest` y `ScriptSigningTest`): el lockfile de arriba firmado con la clave K1 de la RFC 8032 (`key_id` = `21fe31dfa154a261`):
 

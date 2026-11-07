@@ -240,6 +240,103 @@ class ScriptHostTest {
         assertThat(estado("errores").errors()).hasSize(20);
     }
 
+    // ===== Comandos (capacidad commands) =====
+
+    @Test
+    void unScriptRegistraComandosConSuPermiso() {
+        host.load(List.of(script("tienda", """
+            sam.command('precio', function(p, texto, args)
+              return (p and p.name or 'consola') .. ' pidió [' .. texto .. '] ' .. #args .. ' ' .. (args[2] or '-')
+            end)
+            sam.command('cerrar', function() sam.log('cerrada') end, {permission = 3})
+            """, "commands")));
+        assertThat(host.commands()).containsExactly(new ScriptHost.Command("precio", 0, "tienda"),
+            new ScriptHost.Command("cerrar", 3, "tienda"));
+        assertThat(host.runCommand("precio", Optional.of(STEVE), "espada  de diamante").value())
+            .contains("Steve pidió [espada  de diamante] 3 de");
+        assertThat(host.runCommand("precio", Optional.empty(), "").value()).contains("consola pidió [] 0 -");
+        // Sin valor de retorno no hay respuesta
+        assertThat(host.runCommand("cerrar", Optional.empty(), "").value()).isEmpty();
+        assertThat(servidor.log).containsExactly("tienda: cerrada");
+        assertThat(host.runCommand("nada", Optional.empty(), "").error()).contains("el comando /nada no está disponible");
+    }
+
+    @Test
+    void losNombresYPermisosInvalidosOTomadosSonErroresDelScript() {
+        host.reserveCommands(List.of("give", "sam"));
+        host.load(List.of(script("primero", "sam.command('hola', function() end)", "commands"), script("malo", """
+            function mayus() sam.command('Hola', function() end) end
+            function largo() sam.command('a' .. string.rep('b', 32), function() end) end
+            function permiso() sam.command('x', function() end, {permission = 5}) end
+            function negativo() sam.command('y', function() end, {permission = -1}) end
+            function vanilla() sam.command('give', function() end) end
+            function propio() sam.command('sam', function() end) end
+            function ajeno() sam.command('hola', function() end) end
+            function muchos() for i = 1, 17 do sam.command('c' .. i, function() end) end end
+            function borde() sam.command('a' .. string.rep('b', 31), function() end, {permission = 4}) end
+            """, "commands")));
+        assertThat(host.call("malo", "mayus").error()).hasValueSatisfying(e -> assertThat(e).contains("[a-z][a-z0-9_]"));
+        assertThat(host.call("malo", "largo").error()).isPresent();
+        assertThat(host.call("malo", "permiso").error()).hasValueSatisfying(e -> assertThat(e).contains("0 y 4"));
+        assertThat(host.call("malo", "negativo").error()).isPresent();
+        assertThat(host.call("malo", "vanilla").error()).hasValueSatisfying(e -> assertThat(e).contains("ya existe en el servidor"));
+        assertThat(host.call("malo", "propio").error()).hasValueSatisfying(e -> assertThat(e).contains("ya existe en el servidor"));
+        assertThat(host.call("malo", "ajeno").error()).hasValueSatisfying(e -> assertThat(e).contains("el script primero"));
+        assertThat(host.call("malo", "borde").error()).isEmpty();
+        assertThat(host.call("malo", "muchos").error()).hasValueSatisfying(e -> assertThat(e).contains("16 comandos"));
+        assertThat(host.commands()).extracting(ScriptHost.Command::name).contains("hola", "a" + "b".repeat(31));
+    }
+
+    @Test
+    void losComandosDeUnScriptSuspendidoOSinCapacidadNoCorren() {
+        host.load(List.of(script("loco", "sam.command('loco', function() while true do end end)", "commands"),
+            script("sin", "sam.log(type(sam.command))")));
+        assertThat(servidor.log).containsExactly("sin: nil");
+        assertThat(host.runCommand("loco", Optional.empty(), "").error()).isPresent();
+        assertThat(host.runCommand("loco", Optional.empty(), "").error()).contains("el comando /loco no está disponible");
+        // Recargar descarta los comandos anteriores
+        host.load(List.of());
+        assertThat(host.commands()).isEmpty();
+    }
+
+    @Test
+    void elTopeEsDe16PorScriptYElPermisoPorDefectoEs0() {
+        host.load(List.of(script("otro", "for i = 1, 16 do sam.command('o' .. i, function() end) end", "commands"), script("lleno", """
+            function f()
+              local ok = 0
+              for i = 1, 17 do if pcall(sam.command, 'l' .. i, function() end) then ok = ok + 1 end end
+              return ok
+            end
+            sam.command('vacio', function() end, {})
+            """, "commands")));
+        assertThat(host.call("lleno", "f").value()).contains("15");
+        assertThat(host.commands()).hasSize(32).contains(new ScriptHost.Command("vacio", 0, "lleno"));
+    }
+
+    @Test
+    void recargarBorraLosComandosYUnSuspendidoNoLosMuestra() {
+        host.load(List.of(script("vivo", "sam.command('vivo', function() return 'sí' end)", "commands"),
+            script("loco", "sam.command('loco', function() while true do end end)", "commands")));
+        host.runCommand("loco", Optional.empty(), "");
+        assertThat(host.commands()).extracting(ScriptHost.Command::name).containsExactly("vivo");
+        host.load(List.of());
+        assertThat(host.runCommand("vivo", Optional.empty(), "").error()).contains("el comando /vivo no está disponible");
+    }
+
+    @Test
+    void unScriptQueFallaAlCargarNoDejaComandos() {
+        host.load(List.of(script("roto", "sam.command('roto', function() return 'no' end) error('después')", "commands"),
+            script("sigue", "sam.command('roto', function() return 'ahora es mío' end)", "commands")));
+        // El nombre quedó libre para otro script
+        assertThat(host.commands()).containsExactly(new ScriptHost.Command("roto", 0, "sigue"));
+        assertThat(host.runCommand("roto", Optional.empty(), "").value()).contains("ahora es mío");
+        host.load(List.of(script("antes", "sam.command('antes', function() end)", "commands"),
+            script("roto", "sam.command('roto', function() return 'no' end) error('después')", "commands")));
+        // Solo se van los del script que falló
+        assertThat(host.commands()).containsExactly(new ScriptHost.Command("antes", 0, "antes"));
+        assertThat(host.runCommand("roto", Optional.empty(), "").error()).contains("el comando /roto no está disponible");
+    }
+
     @Test
     void unScriptQueNoCargaQuedaFallidoYNoAfectaALosDemas() {
         host.load(List.of(script("roto", "esto no es lua"), script("sano", "sam.log('ok')")));

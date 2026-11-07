@@ -75,7 +75,10 @@ class LuaSandboxTest {
     void loadSoloAceptaTextoYUsaElEntornoDelScript() {
         assertThat(f("secreto = 7 function f() return load('return secreto')() end").value()).contains("7");
         // Un chunk binario (bytecode) se rechaza aunque se pida modo "b"
-        assertThat(f("function f() return load('\\27Lua' .. string.rep('x', 40), 'x', 'b') end").value()).contains("nil");
+        assertThat(f("function f() return tostring(load('\\27Lua' .. string.rep('x', 40), 'x', 'b')) end").value()).contains("nil");
+        // nil devuelto es "sin valor"
+        assertThat(f("function f() return nil end").value()).isEmpty();
+        assertThat(f("function f() end").value()).isEmpty();
         assertThat(f("function f() local fn, err = load('\\27Lua' .. string.rep('x', 40)) return err ~= nil end").value())
             .contains("true");
         // Un entorno pedido explícitamente sí se respeta (es una tabla del propio script)

@@ -3,6 +3,7 @@ package dev.sam.common.lua;
 import static org.squiddev.cobalt.ValueFactory.valueOf;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -34,6 +35,8 @@ public final class ScriptHost {
     static final int MAX_HANDLERS = 16;
     static final int MAX_TICKS = 72_000;
     static final int MAX_TEXT = 256;
+    static final int MAX_COMMANDS = 16;
+    private static final java.util.regex.Pattern COMMAND = java.util.regex.Pattern.compile("[a-z][a-z0-9_]{0,31}");
     private static final int MAX_LOG = 512;
     private static final int MAX_ERRORS = 20;
 
@@ -71,6 +74,13 @@ public final class ScriptHost {
     public record Status(String id, State state, List<String> errors) {
     }
 
+    /** Un comando registrado por un script ({@code sam.command}): su nombre, nivel de permiso y dueño. */
+    public record Command(String name, int permission, String script) {
+    }
+
+    private record CommandEntry(Command spec, Loaded owner, LuaFunction function) {
+    }
+
     private record Task(int id, long due, int every, LuaFunction function) {
     }
 
@@ -96,6 +106,8 @@ public final class ScriptHost {
     private final Bridge bridge;
     private final ScriptLimits limits;
     private final Map<String, Loaded> scripts = new LinkedHashMap<>();
+    private final Map<String, CommandEntry> commands = new LinkedHashMap<>();
+    private java.util.Set<String> reserved = java.util.Set.of();
     private long tick;
 
     public ScriptHost(Bridge bridge, ScriptLimits limits) {
@@ -106,6 +118,7 @@ public final class ScriptHost {
     /** Descarta todo lo cargado y carga estos scripts (RF-LUA-02: errores aislados por script). */
     public synchronized void load(List<Package> packages) {
         scripts.clear();
+        commands.clear();
         for (var pack : packages) {
             var loaded = new Loaded(pack);
             scripts.put(loaded.id(), loaded);
@@ -113,6 +126,7 @@ public final class ScriptHost {
             if (outcome.error().isPresent()) {
                 loaded.state = State.FAILED;
                 record(loaded, outcome.error().get());
+                commands.values().removeIf(entry -> entry.owner() == loaded);
             }
         }
     }
@@ -162,6 +176,37 @@ public final class ScriptHost {
             return LuaSandbox.Outcome.failed("el script no cargó");
         }
         return run(loaded, () -> loaded.script.call(function));
+    }
+
+    /** Los nombres de comando que ya tiene el servidor (vanilla, otros mods, sam): ningún script puede usarlos. */
+    public synchronized void reserveCommands(Collection<String> names) {
+        reserved = java.util.Set.copyOf(names);
+    }
+
+    /** Los comandos de los scripts que están corriendo, en orden de registro. */
+    public synchronized List<Command> commands() {
+        return commands.values().stream().filter(e -> e.owner().state == State.RUNNING).map(CommandEntry::spec).toList();
+    }
+
+    /**
+     * Ejecuta un comando de un script.
+     *
+     * @param player quien lo ejecutó, o vacío si fue la consola
+     * @param args el texto después del nombre
+     * @return el valor que devolvió el script (la respuesta) o el error
+     */
+    public synchronized LuaSandbox.Outcome runCommand(String name, Optional<Player> player, String args) {
+        var entry = commands.get(name);
+        if (entry == null || entry.owner().state != State.RUNNING) {
+            return LuaSandbox.Outcome.failed("el comando /" + name + " no está disponible");
+        }
+        var argv = new LuaTable();
+        var words = args.strip().isEmpty() ? new String[0] : args.strip().split("\\s+");
+        for (var i = 0; i < words.length; i++) {
+            argv.rawset(i + 1, LuaSandbox.lua(words[i]));
+        }
+        LuaValue who = player.isPresent() ? playerTable(player.get()) : Constants.NIL;
+        return run(entry.owner(), () -> entry.owner().script.invoke(entry.function(), who, LuaSandbox.lua(args), argv));
     }
 
     public synchronized List<Status> status() {
@@ -224,6 +269,9 @@ public final class ScriptHost {
                 return Constants.NIL;
             }));
         }
+        if (loaded.manifest.has("commands")) {
+            functions.add(RegisteredFunction.ofV("command", (s, args) -> command(loaded, args)));
+        }
         RegisteredFunction.bind(sam, functions.toArray(RegisteredFunction[]::new));
         state.globals().rawset("sam", sam);
     }
@@ -237,6 +285,35 @@ public final class ScriptHost {
         }
         list.add(fn);
         return Constants.NIL;
+    }
+
+    private org.squiddev.cobalt.Varargs command(Loaded loaded, org.squiddev.cobalt.Varargs args) throws LuaError {
+        var name = string(args.arg(1));
+        var fn = args.arg(2).checkFunction();
+        var options = args.arg(3);
+        var permission = 0;
+        if (!options.isNil()) {
+            var level = options.checkTable().rawget("permission");
+            permission = level.isNil() ? 0 : level.checkInteger();
+        }
+        if (!COMMAND.matcher(name).matches()) {
+            throw new LuaError("nombre de comando inválido \"" + name + "\": [a-z][a-z0-9_], hasta 32");
+        }
+        if (permission < 0 || permission > 4) {
+            throw new LuaError("el permiso debe estar entre 0 y 4");
+        }
+        if (reserved.contains(name)) {
+            throw new LuaError("/" + name + " ya existe en el servidor");
+        }
+        var taken = commands.get(name);
+        if (taken != null) {
+            throw new LuaError("/" + name + " ya lo registró el script " + taken.owner().id());
+        }
+        if (commands.values().stream().filter(e -> e.owner() == loaded).count() >= MAX_COMMANDS) {
+            throw new LuaError("como mucho " + MAX_COMMANDS + " comandos por script");
+        }
+        commands.put(name, new CommandEntry(new Command(name, permission, loaded.id()), loaded, fn));
+        return Constants.NONE;
     }
 
     private LuaValue schedule(Loaded loaded, int ticks, LuaFunction fn, boolean repeat) throws LuaError {
