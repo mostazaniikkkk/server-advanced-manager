@@ -5,6 +5,7 @@ import java.util.function.Function;
 
 import org.slf4j.Logger;
 
+import dev.sam.client.mixin.ClientCommonPacketListenerAccessor;
 import dev.sam.client.net.SamClientNet;
 import dev.sam.client.net.SamPayload;
 import dev.sam.common.proto.ProtocolException;
@@ -69,7 +70,8 @@ public final class SamClientAuth {
                 encode(new HelloAck(ProtocolVersion.CURRENT, version, new byte[32])::write)));
             var client = context.client();
             var sender = context.responseSender();
-            client.execute(() -> client.setScreen(new AuthScreen(hello, client.getUser().getName(), sender)));
+            var connection = ((ClientCommonPacketListenerAccessor) context.networkHandler()).sam$connection();
+            client.execute(() -> client.setScreen(new AuthScreen(hello, client.getUser().getName(), sender, connection)));
         });
         ClientConfigurationNetworking.registerGlobalReceiver(AUTH_RESULT, (payload, context) -> {
             var result = decode(payload, AuthResult::read, context.responseSender());

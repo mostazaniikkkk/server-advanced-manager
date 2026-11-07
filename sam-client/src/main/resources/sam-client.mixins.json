@@ -4,6 +4,7 @@
   "package": "dev.sam.client.mixin",
   "compatibilityLevel": "JAVA_21",
   "client": [
+    "ClientCommonPacketListenerAccessor",
     "ConnectScreenMixin",
     "ConnectionMixin",
     "ServerAddressMixin"

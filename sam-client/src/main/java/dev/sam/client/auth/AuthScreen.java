@@ -26,6 +26,7 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.PlayerFaceRenderer;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.Connection;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.Style;
 import net.minecraft.util.FormattedCharSequence;
@@ -60,6 +61,7 @@ public final class AuthScreen extends Screen {
     private final Hello hello;
     private final String nick;
     private final PacketSender sender;
+    private final Connection connection;
     private final boolean registering;
     private EditBox password;
     private EditBox confirm;
@@ -78,12 +80,17 @@ public final class AuthScreen extends Screen {
     private boolean capsLock;
     private int previousLockKeyMods = -1;
 
-    /** @param sender la conexión en configuration: para desconectarse desde la pantalla */
-    public AuthScreen(Hello hello, String nick, PacketSender sender) {
+    /**
+     * @param sender para responder y desconectarse desde la pantalla
+     * @param connection la conexión en configuration: en vanilla la atiende la ConnectScreen, que esta
+     *     pantalla reemplaza; sin atenderla, una desconexión (Salir, expulsión) no llega nunca al jugador
+     */
+    public AuthScreen(Hello hello, String nick, PacketSender sender, Connection connection) {
         super(Component.literal(hello.accountState() == AccountState.NEW ? "Crear cuenta" : "Iniciar sesión"));
         this.hello = hello;
         this.nick = nick;
         this.sender = sender;
+        this.connection = connection;
         this.registering = hello.accountState() == AccountState.NEW;
     }
 
@@ -395,7 +402,18 @@ public final class AuthScreen extends Screen {
     @Override
     public void tick() {
         super.tick();
+        // Lo mismo que hace la ConnectScreen con la conexión mientras está abierta
+        if (connection.isConnected()) {
+            connection.tick();
+        } else {
+            connection.handleDisconnection();
+        }
         ticks++;
+        // {@code -Dsam.dev.leave=true}: pulsa Salir a los 20 ticks (prueba de punta a punta)
+        if (isDev() && Boolean.getBoolean("sam.dev.leave") && ticks == 20) {
+            leave();
+            return;
+        }
         var name = System.getProperty("sam.dev.screenshot");
         if (isDev() && name != null && ticks == Integer.getInteger("sam.dev.screenshotDelay", 30)) {
             Screenshot.grab(minecraft.gameDirectory, name + ".png", minecraft.getMainRenderTarget(),

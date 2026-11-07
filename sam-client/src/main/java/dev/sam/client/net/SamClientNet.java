@@ -29,6 +29,7 @@ import dev.sam.common.net.ws.WebSocketClientHandshake;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.channel.Channel;
 import io.netty.handler.ssl.SslHandler;
+import io.netty.util.AttributeKey;
 
 /**
  * El TLS de SAM en el cliente (PROTOCOLO.md 2.4 y 3): antes de conectar, una dirección fijada va
@@ -45,6 +46,17 @@ public final class SamClientNet {
     private static final int PROBE_TIMEOUT_MILLIS = 3000;
 
     public static final String OUTER_TLS_NAME = "sam_wss_tls";
+
+    /** Por qué SAM cortó la conexión: lo que el jugador ve en la pantalla de desconexión. */
+    public static final AttributeKey<String> FAILURE = AttributeKey.valueOf("sam_failure");
+
+    public static void fail(Channel channel, String reason) {
+        channel.attr(FAILURE).setIfAbsent(reason);
+    }
+
+    public static Optional<String> failure(Channel channel) {
+        return Optional.ofNullable(channel.attr(FAILURE).get());
+    }
 
     /** A dónde va una conexión por TLS; por WebSocket si la dirección es ws:// o wss://. */
     public record Plan(ServerAddress address, String host, int port) {
@@ -157,7 +169,10 @@ public final class SamClientNet {
         var address = plan.address();
         var handshake = new WebSocketClientHandshake(hostHeader(address), address.path(),
             new SecureRandom(), tunnel -> tunnel.pipeline().addAfter(tunnel.name(), TLS_NAME, samTls(channel, plan, resume)),
-            reason -> log.warn("WebSocket con {} rechazado: {}", address, reason));
+            reason -> {
+                log.warn("WebSocket con {} rechazado: {}", address, reason);
+                fail(channel, "El servidor rechazó la conexión WebSocket: " + reason);
+            });
         if (address.transport() != ServerAddress.Transport.WSS) {
             pipeline.addFirst(WebSocketClientHandshake.NAME, handshake);
             return;
@@ -173,12 +188,14 @@ public final class SamClientNet {
             outer.handshakeFuture().addListener(done -> {
                 if (!done.isSuccess()) {
                     log.warn("TLS hacia {} falló: {}", address, done.cause().toString());
+                    fail(channel, "No se pudo abrir la conexión segura con " + address.host() + ": " + done.cause().getMessage());
                 }
             });
             pipeline.addFirst(OUTER_TLS_NAME, outer);
             pipeline.addAfter(OUTER_TLS_NAME, WebSocketClientHandshake.NAME, handshake);
         } catch (SSLException e) {
             log.error("No se pudo preparar el TLS hacia {}: {}", address, e.getMessage());
+            fail(channel, "No se pudo preparar la conexión segura: " + e.getMessage());
             channel.close();
         }
     }
@@ -195,10 +212,14 @@ public final class SamClientNet {
         tls.handshakeFuture().addListener(done -> {
             if (!done.isSuccess()) {
                 log.warn("TLS de SAM con {} falló: {}", plan.address(), done.cause().toString());
+                fail(channel, "Falló la conexión segura de SAM: " + done.cause().getMessage());
                 return;
             }
             var observed = observer.observed();
-            if (observed.isEmpty() || !accept(plan, observed.get())) {
+            var refused = observed.map(server -> accept(plan, server))
+                .orElse(Optional.of("El servidor no presentó una identidad de SAM."));
+            if (refused.isPresent()) {
+                fail(channel, refused.get());
                 channel.close();
                 return;
             }
@@ -216,7 +237,8 @@ public final class SamClientNet {
         return Optional.ofNullable(lastFingerprint);
     }
 
-    private static synchronized boolean accept(Plan plan, ServerCertificateObserver.ObservedServer server) {
+    /** @return vacío si el servidor es de confianza; si no, el motivo para el jugador */
+    private static synchronized Optional<String> accept(Plan plan, ServerCertificateObserver.ObservedServer server) {
         var verdict = pins.verify(plan.address(), server.serverId(), server.publicKey());
         var fingerprint = ServerFingerprint.of(server.publicKey().pin().toBytes()).phrase();
         switch (verdict) {
@@ -234,17 +256,19 @@ public final class SamClientNet {
             case Verdict.IdentityMismatch mismatch -> {
                 log.error("[{}] {} presenta otro servidor (server_id {}, se esperaba {}). Conexión cortada.", mismatch.code(),
                     plan.address(), mismatch.presented().hex(), mismatch.expected().hex());
-                return false;
+                return Optional.of("[" + mismatch.code() + "] Esta dirección presenta un servidor distinto al que conoces."
+                    + " Conexión cortada por seguridad.");
             }
             case Verdict.KeyChanged changed -> {
                 log.error("[{}] {} cambió de clave sin rotación válida (huella «{}»). Conexión cortada.", changed.code(),
                     plan.address(), fingerprint);
-                return false;
+                return Optional.of("[" + changed.code() + "] El servidor cambió de clave sin una rotación válida."
+                    + " Conexión cortada por seguridad.");
             }
         }
         lastVerified = server.serverId();
         lastFingerprint = fingerprint;
-        return true;
+        return Optional.empty();
     }
 
     private static void save(PinStore updated) {

@@ -26,6 +26,7 @@ public final class SamClient implements ClientModInitializer {
         SamClientNet.init(FabricLoader.getInstance().getConfigDir().resolve("sam-client/pins.json"), LOGGER);
         SamClientAuth.install(LOGGER, version);
         devQuitAfterJoin();
+        devQuitOnDisconnect();
     }
 
     /**
@@ -49,6 +50,32 @@ public final class SamClient implements ClientModInitializer {
             }, "SAM dev quit");
             timer.setDaemon(true);
             timer.start();
+        });
+    }
+
+    /**
+     * Solo en desarrollo, con {@code sam.dev.quitAfterJoin} o {@code sam.dev.screenshot}: si la conexión
+     * termina en la pantalla de desconexión, se captura (con el motivo) y se cierra el juego.
+     */
+    private static void devQuitOnDisconnect() {
+        if (!FabricLoader.getInstance().isDevelopmentEnvironment()
+                || (System.getProperty("sam.dev.quitAfterJoin") == null && System.getProperty("sam.dev.screenshot") == null)) {
+            return;
+        }
+        net.fabricmc.fabric.api.client.screen.v1.ScreenEvents.AFTER_INIT.register((client, screen, width, height) -> {
+            if (!(screen instanceof net.minecraft.client.gui.screens.DisconnectedScreen)) {
+                return;
+            }
+            var ticks = new int[1];
+            net.fabricmc.fabric.api.client.screen.v1.ScreenEvents.afterTick(screen).register(shown -> {
+                if (++ticks[0] != 30) {
+                    return;
+                }
+                var name = System.getProperty("sam.dev.screenshot", "desconexion");
+                net.minecraft.client.Screenshot.grab(client.gameDirectory, name + ".png", client.getMainRenderTarget(),
+                    message -> LOGGER.info("[dev] Desconectado; captura: {}", message.getString()));
+                client.execute(client::stop);
+            });
         });
     }
 

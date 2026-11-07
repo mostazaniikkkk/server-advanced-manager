@@ -164,7 +164,7 @@ public final class SamServer implements DedicatedServerModInitializer {
     private static boolean startAuth(ServerId serverId, Map<String, String> config) {
         var file = FabricLoader.getInstance().getConfigDir().resolve("sam/accounts.json");
         try {
-            var minPassword = Integer.parseInt(config.getOrDefault(PASSWORD_MIN_LENGTH, "10").strip());
+            var minPassword = Integer.parseInt(config.getOrDefault(PASSWORD_MIN_LENGTH, "6").strip());
             var policy = new AuthPolicyView(List.of(AuthMethod.PASSWORD), false, false, EmailVerify.LATER, minPassword);
             var accounts = new AccountService(AccountsFile.load(file), Argon2Params.SERVER_DEFAULT, new SecureRandom(),
                 all -> {
