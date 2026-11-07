@@ -42,7 +42,10 @@ tasks.withType<JavaCompile>().configureEach {
 tasks.jar {
     manifest { attributes["Main-Class"] = "dev.sam.signer.SamSigner" }
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    from(configurations.runtimeClasspath.get().map { if (it.isDirectory) it else zipTree(it) }) {
+    val runtimeJars = configurations.runtimeClasspath
+    // Declarado como dependencia: el jar de sam-common se construye antes
+    dependsOn(runtimeJars)
+    from(runtimeJars.map { classpath -> classpath.map { if (it.isDirectory) it else zipTree(it) } }) {
         // Las firmas de los jars originales no valen para el jar combinado
         exclude("META-INF/*.SF", "META-INF/*.RSA", "META-INF/*.DSA", "META-INF/*.EC", "module-info.class", "META-INF/versions/*/module-info.class")
     }
