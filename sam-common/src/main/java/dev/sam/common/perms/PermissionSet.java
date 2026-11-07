@@ -515,6 +515,215 @@ public record PermissionSet(Map<String, Group> groups, Map<String, User> users) 
         writer.endObject();
     }
 
+    // ===== Cambios (/sam perms, docs/PERMISOS.md sección 4) =====
+    // Cada cambio arma el conjunto nuevo y lo pasa por la misma lectura estricta que el archivo.
+
+    public PermissionSet createGroup(String name, int weight) {
+        if (groups.containsKey(name)) {
+            throw change("el grupo " + name + " ya existe");
+        }
+        var copy = new TreeMap<>(groups);
+        copy.put(name, new Group(weight, List.of(), Map.of(), Map.of()));
+        return validated(copy, users);
+    }
+
+    public PermissionSet deleteGroup(String name) {
+        group(name);
+        if (name.equals(DEFAULT)) {
+            throw change("el grupo default no se puede borrar");
+        }
+        for (var entry : new TreeMap<>(groups).entrySet()) {
+            if (entry.getValue().parents().contains(name)) {
+                throw change(name + " es padre de " + entry.getKey() + ": quítalo de ahí primero");
+            }
+        }
+        var copy = new TreeMap<>(groups);
+        copy.remove(name);
+        var newUsers = new TreeMap<String, User>();
+        users.forEach((nick, user) -> {
+            var memberships = new TreeMap<>(user.groups());
+            memberships.remove(name);
+            newUsers.put(nick, new User(memberships, user.permissions(), user.meta()));
+        });
+        return validated(copy, newUsers);
+    }
+
+    public PermissionSet setWeight(String group, int weight) {
+        var old = group(group);
+        return withGroup(group, new Group(weight, old.parents(), old.permissions(), old.meta()));
+    }
+
+    public PermissionSet addParent(String group, String parent) {
+        var old = group(group);
+        group(parent);
+        if (old.parents().contains(parent)) {
+            throw change(group + " ya hereda de " + parent);
+        }
+        var parents = new ArrayList<>(old.parents());
+        parents.add(parent);
+        return withGroup(group, new Group(old.weight(), parents, old.permissions(), old.meta()));
+    }
+
+    public PermissionSet removeParent(String group, String parent) {
+        var old = group(group);
+        if (!old.parents().contains(parent)) {
+            throw change(group + " no hereda de " + parent);
+        }
+        var parents = new ArrayList<>(old.parents());
+        parents.remove(parent);
+        return withGroup(group, new Group(old.weight(), parents, old.permissions(), old.meta()));
+    }
+
+    public PermissionSet setGroupPermission(String group, String node, Grant grant) {
+        var old = group(group);
+        var permissions = new TreeMap<>(old.permissions());
+        permissions.put(node, grant);
+        return withGroup(group, new Group(old.weight(), old.parents(), permissions, old.meta()));
+    }
+
+    public PermissionSet unsetGroupPermission(String group, String node) {
+        var old = group(group);
+        var permissions = new TreeMap<>(old.permissions());
+        if (permissions.remove(node) == null) {
+            throw change(group + " no tiene el nodo " + node);
+        }
+        return withGroup(group, new Group(old.weight(), old.parents(), permissions, old.meta()));
+    }
+
+    public PermissionSet setGroupMeta(String group, String key, Meta meta) {
+        var old = group(group);
+        var metas = new TreeMap<>(old.meta());
+        metas.put(key, meta);
+        return withGroup(group, new Group(old.weight(), old.parents(), old.permissions(), metas));
+    }
+
+    public PermissionSet unsetGroupMeta(String group, String key) {
+        var old = group(group);
+        var metas = new TreeMap<>(old.meta());
+        if (metas.remove(key) == null) {
+            throw change(group + " no tiene la meta " + key);
+        }
+        return withGroup(group, new Group(old.weight(), old.parents(), old.permissions(), metas));
+    }
+
+    public PermissionSet addUserGroup(String nick, String group, OptionalLong expires) {
+        group(group);
+        var old = user(nick);
+        var memberships = new TreeMap<>(old.groups());
+        memberships.put(group, expires);
+        return withUser(nick, new User(memberships, old.permissions(), old.meta()));
+    }
+
+    public PermissionSet removeUserGroup(String nick, String group) {
+        var old = user(nick);
+        var memberships = new TreeMap<>(old.groups());
+        if (memberships.remove(group) == null) {
+            throw change(key(nick) + " no está en el grupo " + group);
+        }
+        return withUser(nick, new User(memberships, old.permissions(), old.meta()));
+    }
+
+    public PermissionSet setUserPermission(String nick, String node, Grant grant) {
+        var old = user(nick);
+        var permissions = new TreeMap<>(old.permissions());
+        permissions.put(node, grant);
+        return withUser(nick, new User(old.groups(), permissions, old.meta()));
+    }
+
+    public PermissionSet unsetUserPermission(String nick, String node) {
+        var old = user(nick);
+        var permissions = new TreeMap<>(old.permissions());
+        if (permissions.remove(node) == null) {
+            throw change(key(nick) + " no tiene el nodo " + node);
+        }
+        return withUser(nick, new User(old.groups(), permissions, old.meta()));
+    }
+
+    public PermissionSet setUserMeta(String nick, String key, Meta meta) {
+        var old = user(nick);
+        var metas = new TreeMap<>(old.meta());
+        metas.put(key, meta);
+        return withUser(nick, new User(old.groups(), old.permissions(), metas));
+    }
+
+    public PermissionSet unsetUserMeta(String nick, String key) {
+        var old = user(nick);
+        var metas = new TreeMap<>(old.meta());
+        if (metas.remove(key) == null) {
+            throw change(key(nick) + " no tiene la meta " + key);
+        }
+        return withUser(nick, new User(old.groups(), old.permissions(), metas));
+    }
+
+    private Group group(String name) {
+        var group = groups.get(name);
+        if (group == null) {
+            throw change("no existe el grupo " + name);
+        }
+        return group;
+    }
+
+    private static String key(String nick) {
+        return nick.toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private User user(String nick) {
+        return users.getOrDefault(key(nick), new User(Map.of(), Map.of(), Map.of()));
+    }
+
+    private PermissionSet withGroup(String name, Group group) {
+        var copy = new TreeMap<>(groups);
+        copy.put(name, group);
+        return validated(copy, users);
+    }
+
+    private PermissionSet withUser(String nick, User user) {
+        var copy = new TreeMap<>(users);
+        copy.put(key(nick), user);
+        return validated(groups, copy);
+    }
+
+    /** El conjunto nuevo, sin jugadores vacíos, validado con las reglas del archivo. */
+    private static PermissionSet validated(Map<String, Group> groups, Map<String, User> users) {
+        var kept = new TreeMap<String, User>();
+        users.forEach((nick, user) -> {
+            if (!user.groups().isEmpty() || !user.permissions().isEmpty() || !user.meta().isEmpty()) {
+                kept.put(nick, user);
+            }
+        });
+        try {
+            return parse(new PermissionSet(groups, kept).toJson());
+        } catch (IllegalArgumentException e) {
+            throw change(e.getMessage().substring("permissions.json inválido: ".length()));
+        }
+    }
+
+    private static IllegalArgumentException change(String reason) {
+        return new IllegalArgumentException(reason);
+    }
+
+    private static final Pattern DURATION = Pattern.compile("(?:(\\d{1,4})d)?(?:(\\d{1,5})h)?(?:(\\d{1,6})m)?(?:(\\d{1,8})s)?");
+    private static final long MAX_DURATION = 3650L * 86_400;
+
+    /** Una duración como {@code 30d}, {@code 12h}, {@code 45m}, {@code 90s} o {@code 1d12h}, en segundos (hasta 3650 días). */
+    public static long duration(String text) {
+        var matcher = DURATION.matcher(text);
+        var seconds = 0L;
+        if (matcher.matches()) {
+            long[] units = {86_400, 3600, 60, 1};
+            for (var i = 0; i < units.length; i++) {
+                var group = matcher.group(i + 1);
+                if (group != null) {
+                    seconds += Long.parseLong(group) * units[i];
+                }
+            }
+        }
+        if (seconds <= 0 || seconds > MAX_DURATION) {
+            throw new IllegalArgumentException("duración inválida \"" + text + "\": por ejemplo 30d, 12h, 45m, 90s o 1d12h (hasta 3650d)");
+        }
+        return seconds;
+    }
+
     private static IllegalArgumentException invalid(String reason) {
         return new IllegalArgumentException("permissions.json inválido: " + reason);
     }
