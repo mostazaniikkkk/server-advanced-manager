@@ -419,8 +419,6 @@ SAM_POLICY_DEFAULT_SESSION_TTL=7d
 SAM_AUDIT_IP_RETENTION=90d
 
 # ===== Scripts Lua =====
-SAM_ADMIN_OP_LEVEL=2                                # nivel de OP desde el que se es admin (RF-ADM-02)
-SAM_RCON_SENSITIVE_COMMANDS=false                   # comandos sensibles por RCON (RS-ADM-01)
 SAM_SCRIPTS_ENABLED=true
 SAM_SCRIPTS_TRUSTED_KEYS=config/sam/keys/trusted/   # claves públicas (se confirman desde la consola)
 SAM_SCRIPTS_DEV_MODE=false                          # permite scripts sin firmar SOLO del lado servidor
