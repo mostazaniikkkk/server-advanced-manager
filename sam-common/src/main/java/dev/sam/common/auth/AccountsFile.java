@@ -12,6 +12,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
@@ -43,6 +44,9 @@ public final class AccountsFile {
                 writer.name("nick").value(account.nick());
                 writer.name("hash").value(account.passwordHash());
                 writer.name("email").value(account.email());
+                if (account.googleSub().isPresent()) {
+                    writer.name("google").value(account.googleSub().get());
+                }
                 writer.endObject();
             }
             writer.endArray();
@@ -123,11 +127,16 @@ public final class AccountsFile {
     private static List<Account> readAccounts(JsonReader reader) throws IOException {
         var accounts = new ArrayList<Account>();
         var keys = new HashSet<String>();
+        var googleSubs = new HashSet<String>();
         reader.beginArray();
         while (reader.hasNext()) {
             var account = readAccount(reader);
             if (!keys.add(account.key())) {
                 throw invalid("cuenta repetida " + account.key());
+            }
+            // RF-OAUTH-03: una cuenta de Google va a una sola cuenta del servidor
+            if (account.googleSub().isPresent() && !googleSubs.add(account.googleSub().get())) {
+                throw invalid("Google repetido en " + account.key());
             }
             accounts.add(account);
         }
@@ -140,7 +149,7 @@ public final class AccountsFile {
         reader.beginObject();
         while (reader.hasNext()) {
             var name = reader.nextName();
-            if (!List.of("nick", "hash", "email").contains(name) || fields.containsKey(name)) {
+            if (!List.of("nick", "hash", "email", "google").contains(name) || fields.containsKey(name)) {
                 throw invalid("campo inválido " + name);
             }
             if (reader.peek() != JsonToken.STRING) {
@@ -152,7 +161,8 @@ public final class AccountsFile {
         var nick = fields.get("nick");
         var hash = fields.get("hash");
         var email = fields.get("email");
-        if (fields.size() != 3 || !Nick.isValid(nick) || !AccountService.isValidEmail(email)) {
+        var google = Optional.ofNullable(fields.get("google"));
+        if (fields.size() != 3 + (google.isPresent() ? 1 : 0) || !Nick.isValid(nick) || !AccountService.isValidEmail(email)) {
             throw invalid("cuenta incompleta o con nick o correo inválido");
         }
         try {
@@ -160,7 +170,10 @@ public final class AccountsFile {
         } catch (IllegalArgumentException e) {
             throw invalid("hash inválido en la cuenta " + nick);
         }
-        return new Account(Nick.normalize(nick), nick, hash, email);
+        if (google.filter(String::isEmpty).isPresent()) {
+            throw invalid("google vacío en la cuenta " + nick);
+        }
+        return new Account(Nick.normalize(nick), nick, hash, email, google);
     }
 
     private static IllegalArgumentException invalid(String detail) {

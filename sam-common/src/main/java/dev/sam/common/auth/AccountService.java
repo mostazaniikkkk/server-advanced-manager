@@ -9,6 +9,9 @@ import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
+import dev.sam.common.proto.account.AccountInfo;
+import dev.sam.common.proto.account.AccountResult;
+import dev.sam.common.proto.account.OAuthProvider;
 import dev.sam.common.proto.auth.AccountState;
 import dev.sam.common.proto.auth.AuthResult;
 import dev.sam.common.proto.auth.AuthResult.Status;
@@ -75,6 +78,108 @@ public final class AccountService {
         }
         // Sin cuenta, la respuesta es la misma que con la contraseña equivocada (RS-AUTH-05)
         return account != null && PasswordHash.verify(k, account.passwordHash()) ? ok() : failed(LOGIN_FAILED);
+    }
+
+    public static final String WRONG_PASSWORD = "Contraseña incorrecta";
+    public static final String GOOGLE_TAKEN = "Esa cuenta de Google ya está vinculada a otro jugador";
+    public static final String GOOGLE_ALREADY = "Tu cuenta ya tiene Google vinculado";
+    public static final String NOT_LINKED = "No hay una cuenta vinculada de ese proveedor";
+
+    /**
+     * Lo que muestra "Opciones de cuenta" (RF-AUTH-07d). El correo va enmascarado; hasta que exista el
+     * envío de correos ninguno está verificado.
+     *
+     * @param googleAvailable el servidor tiene Google configurado
+     */
+    public synchronized AccountInfo info(String nick, boolean googleAvailable) {
+        var account = accounts.get(Nick.normalize(nick));
+        AccountInfo.Google google;
+        if (!googleAvailable) {
+            google = AccountInfo.Google.UNAVAILABLE;
+        } else {
+            google = account.googleSub().isPresent() ? AccountInfo.Google.LINKED : AccountInfo.Google.AVAILABLE;
+        }
+        return new AccountInfo(mask(account.email()), false, google);
+    }
+
+    /** Cambio de correo con la contraseña (RF-AUTH-07b): nunca pide el correo anterior. */
+    public AccountResult changeEmail(String nick, byte[] k, String email) {
+        if (!verified(nick, k)) {
+            return accountFailed(WRONG_PASSWORD);
+        }
+        if (!isValidEmail(email)) {
+            return accountFailed(INVALID_EMAIL);
+        }
+        synchronized (this) {
+            var account = accounts.get(Nick.normalize(nick));
+            replace(account.withEmail(email));
+        }
+        return accountOk();
+    }
+
+    /**
+     * Vincula Google por su {@code sub} (RF-OAUTH-02/03): una cuenta de Google va a una sola cuenta del
+     * servidor y cada cuenta tiene como mucho una. Quien llama ya validó el ID token.
+     */
+    public synchronized AccountResult linkGoogle(String nick, String sub) {
+        var account = accounts.get(Nick.normalize(nick));
+        if (account == null || account.googleSub().isPresent()) {
+            return accountFailed(GOOGLE_ALREADY);
+        }
+        if (nickForGoogle(sub).isPresent()) {
+            return accountFailed(GOOGLE_TAKEN);
+        }
+        replace(account.withGoogleSub(Optional.of(sub)));
+        return accountOk();
+    }
+
+    /** Desvincula con la contraseña (RF-OAUTH-02): la contraseña siempre existe, así que nunca deja la cuenta sin acceso. */
+    public AccountResult unlink(String nick, byte[] k, OAuthProvider provider) {
+        if (!verified(nick, k)) {
+            return accountFailed(WRONG_PASSWORD);
+        }
+        synchronized (this) {
+            var account = accounts.get(Nick.normalize(nick));
+            if (provider != OAuthProvider.GOOGLE || account.googleSub().isEmpty()) {
+                return accountFailed(NOT_LINKED);
+            }
+            replace(account.withGoogleSub(Optional.empty()));
+        }
+        return accountOk();
+    }
+
+    /** La cuenta vinculada a ese {@code sub} de Google, por su nick. */
+    public synchronized Optional<String> nickForGoogle(String sub) {
+        return accounts.values().stream().filter(a -> a.googleSub().filter(sub::equals).isPresent()).map(Account::nick).findFirst();
+    }
+
+    /** {@code steve@example.com} → {@code s***@e***.com} (RS-AUTH-07). */
+    static String mask(String email) {
+        var at = email.indexOf('@');
+        var domain = email.substring(at + 1);
+        return email.charAt(0) + "***@" + domain.charAt(0) + "***" + domain.substring(domain.lastIndexOf('.'));
+    }
+
+    /** Argon2 fuera del candado, como el login. */
+    private boolean verified(String nick, byte[] k) {
+        Account account;
+        synchronized (this) {
+            account = accounts.get(Nick.normalize(nick));
+        }
+        return account != null && PasswordHash.verify(k, account.passwordHash());
+    }
+
+    private void replace(Account account) {
+        accounts.put(account.key(), account);
+        onChange.accept(List.copyOf(accounts.values()));
+    }
+
+    private static AccountResult accountOk() {
+        return new AccountResult(AccountResult.Status.OK, Optional.empty());
+    }
+
+    private static AccountResult accountFailed(String detail) {
+        return new AccountResult(AccountResult.Status.FAILED, Optional.of(detail));
     }
 
     /** Validación básica del correo (RN-36): un {@code @}, sin espacios ni controles, dominio con punto. */
