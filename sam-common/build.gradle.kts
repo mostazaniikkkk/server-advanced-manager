@@ -12,6 +12,8 @@ dependencies {
     implementation(libs.bouncycastle.prov)
     // Construcción de certificados X.509 (la JDK no tiene API pública para generarlos)
     implementation(libs.bouncycastle.pkix)
+    // ID token de Google (RS-OAUTH-05): lo usa el servidor; el cliente nunca carga esas clases
+    implementation(libs.nimbus.jose.jwt)
     // Minecraft trae Gson y Netty 4.1.97: se compila contra ellos pero no se empaquetan
     compileOnly(libs.gson)
     testImplementation(libs.gson)

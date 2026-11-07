@@ -19,6 +19,8 @@ pitestCore = "1.30.1"
 pitestJunit5 = "1.2.3"
 pitestGradle = "1.19.0"
 jacoco = "0.8.16"
+# Validación del ID token de Google (RS-OAUTH-05): solo en el servidor
+nimbusJoseJwt = "10.10"
 
 [plugins]
 pitest = { id = "info.solidsoft.pitest", version.ref = "pitestGradle" }
@@ -43,3 +45,4 @@ netty-codec = { module = "io.netty:netty-codec", version.ref = "netty" }
 netty-transport = { module = "io.netty:netty-transport", version.ref = "netty" }
 netty-buffer = { module = "io.netty:netty-buffer", version.ref = "netty" }
 netty-handler = { module = "io.netty:netty-handler", version.ref = "netty" }
+nimbus-jose-jwt = { module = "com.nimbusds:nimbus-jose-jwt", version.ref = "nimbusJoseJwt" }
