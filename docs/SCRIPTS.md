@@ -27,6 +27,16 @@ El `id` es el nombre de la carpeta. Cada capacidad habilita una parte de la API;
 | `scheduler` | `sam.after(ticks, fn)`, `sam.every(ticks, fn)` (20 ticks = 1 s) y `sam.cancel(id)` |
 | `players` | `sam.players()`: lista de `{name, uuid}` |
 | `chat` | `sam.tell(nombre, texto)` y `sam.broadcast(texto)` (texto plano, hasta 256 caracteres) |
+| `commands` | `sam.command(nombre, fn, {permission = 0..4})` registra `/nombre`: `fn(jugador, texto, args)` recibe al jugador (`nil` si es la consola), el texto después del nombre y sus palabras; lo que devuelve es la respuesta |
+
+Sobre los comandos: el permiso por defecto es 0 (cualquier jugador); con 2 o más solo lo ven y usan los operadores. Como mucho 16 por script. No se puede pisar un comando que ya existe (vanilla, otros mods, `sam` u otro script): se informa en el log y no se registra.
+
+```lua
+sam.command('hola', function(p, texto, args)
+  return '¡Hola, ' .. (p and p.name or 'consola') .. '!'
+end)
+sam.command('anuncio', function(p, texto) sam.broadcast('[Anuncio] ' .. texto) end, {permission = 2})
+```
 
 Ejemplo completo: [ejemplos/sam_scripts/saludo](ejemplos/sam_scripts/saludo).
 

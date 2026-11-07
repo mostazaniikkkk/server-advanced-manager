@@ -55,6 +55,9 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
     private final ScriptHost host;
     private volatile MinecraftServer server;
     private Map<String, Map<String, byte[]>> folders = Map.of();
+    /** Los comandos que SAM agregó al dispatcher actual (al recrearse con /reload, se empieza de cero). */
+    private Object installedOn;
+    private final java.util.Set<String> installed = new HashSet<>();
 
     private SamScripts(Logger log, Path keys, boolean devMode, ScriptLimits limits) {
         this.log = log;
@@ -79,6 +82,9 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
         var scripts = new SamScripts(log, keys, devMode, limits);
         ResourceManagerHelper.get(PackType.SERVER_DATA).registerReloadListener(scripts);
         ServerLifecycleEvents.SERVER_STARTING.register(s -> scripts.server = s);
+        // Los comandos de los scripts entran al árbol cuando existe: al terminar de arrancar y tras cada /reload
+        ServerLifecycleEvents.SERVER_STARTED.register(scripts::installCommands);
+        ServerLifecycleEvents.END_DATA_PACK_RELOAD.register((s, resources, success) -> scripts.installCommands(s));
         ServerLifecycleEvents.SERVER_STOPPED.register(s -> scripts.host.load(List.of()));
         ServerTickEvents.END_SERVER_TICK.register(s -> scripts.host.tick());
         // Los eventos se encolan en el hilo del servidor: JOIN llega antes de que el jugador esté en la lista
@@ -165,6 +171,12 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
         trust.pending().forEach(p -> log.warn("Clave de firma {} ({}) pendiente: confírmala desde la consola con "
             + "«sam scripts trust confirm {}»", p.keyId().hex(), p.file(), p.keyId().hex()));
         var catalog = ScriptCatalog.build(folders, trust.active(), devMode);
+        // Los nombres que ya tiene el servidor no se pueden usar (si todavía no arrancó, se revisa al instalar)
+        var current = server;
+        if (current != null) {
+            host.reserveCommands(current.getCommands().getDispatcher().getRoot().getChildren().stream()
+                .map(com.mojang.brigadier.tree.CommandNode::getName).filter(name -> !ownedHere(current, name)).toList());
+        }
         catalog.warnings().forEach(log::warn);
         catalog.rejected().forEach(r -> log.error("Script {} rechazado: {}", r.id(), r.reason()));
         host.load(catalog.server());
@@ -205,6 +217,7 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
 
     private int reloadCommand(CommandSourceStack source) {
         reload();
+        installCommands(source.getServer());
         source.sendSuccess(() -> Component.literal("Scripts recargados (detalles en el log del servidor)."), true);
         return 1;
     }
@@ -239,7 +252,57 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
         }
         log.warn("[auditoría] Clave de firma de scripts {} confirmada desde la consola", keyId);
         reload();
+        installCommands(source.getServer());
         source.sendSuccess(() -> Component.literal("Clave " + keyId + " confirmada; scripts recargados."), true);
+        return 1;
+    }
+
+    // ===== Comandos de los scripts (capacidad commands, RF-LUA-03) =====
+
+    private boolean ownedHere(MinecraftServer s, String name) {
+        return installedOn == s.getCommands().getDispatcher() && installed.contains(name);
+    }
+
+    /**
+     * Agrega al árbol de comandos los que registraron los scripts y se lo reenvía a los jugadores. Un nombre
+     * que ya tiene el servidor (vanilla u otro mod) no se pisa: se informa y queda sin registrar.
+     */
+    private void installCommands(MinecraftServer s) {
+        var dispatcher = s.getCommands().getDispatcher();
+        if (installedOn != dispatcher) {
+            installedOn = dispatcher;
+            installed.clear();
+        }
+        for (var command : host.commands()) {
+            var name = command.name();
+            if (installed.contains(name)) {
+                continue;
+            }
+            if (dispatcher.getRoot().getChild(name) != null) {
+                log.error("Script {}: /{} ya existe en el servidor; no se registra", command.script(), name);
+                continue;
+            }
+            var level = command.permission();
+            dispatcher.register(Commands.literal(name).requires(source -> source.hasPermission(level))
+                .executes(c -> runScriptCommand(name, c.getSource(), ""))
+                .then(Commands.argument("args", StringArgumentType.greedyString())
+                    .executes(c -> runScriptCommand(name, c.getSource(), StringArgumentType.getString(c, "args")))));
+            installed.add(name);
+        }
+        for (var player : s.getPlayerList().getPlayers()) {
+            s.getCommands().sendCommands(player);
+        }
+    }
+
+    private int runScriptCommand(String name, CommandSourceStack source, String args) {
+        var who = Optional.ofNullable(source.getPlayer()).map(SamScripts::player);
+        var outcome = host.runCommand(name, who, args);
+        if (outcome.error().isPresent()) {
+            // Al jugador, solo la primera línea (sin el stack de Lua); el detalle queda en /sam scripts errors
+            source.sendFailure(Component.literal("/" + name + ": " + outcome.error().get().lines().findFirst().orElse("")));
+            return 0;
+        }
+        outcome.value().ifPresent(reply -> source.sendSuccess(() -> Component.literal(reply), false));
         return 1;
     }
 

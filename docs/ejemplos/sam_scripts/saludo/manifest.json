@@ -1,1 +1,1 @@
-{"id":"saludo","version":"0.1","side":"server","capabilities":["events","scheduler","chat","players"]}
+{"id":"saludo","version":"0.2","side":"server","capabilities":["events","scheduler","chat","players","commands"]}
