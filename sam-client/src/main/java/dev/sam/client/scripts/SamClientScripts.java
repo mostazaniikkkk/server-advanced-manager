@@ -93,6 +93,7 @@ public final class SamClientScripts {
                 protocolError(sender, e);
             }
         }));
+        new ClientScriptRuntime(logger).install();
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> forget());
         net.fabricmc.fabric.api.client.networking.v1.ClientConfigurationConnectionEvents.DISCONNECT
             .register((handler, client) -> forget());

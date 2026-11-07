@@ -30,6 +30,9 @@ dependencies {
     include(libs.bouncycastle.util)
     implementation(libs.netty.codec.http)
     include(libs.netty.codec.http)
+    // Runtime de Lua de los scripts de cliente (RS-LUA-01: la misma sandbox que el servidor)
+    implementation(libs.cobalt)
+    include(libs.cobalt)
     // QR del 2FA (RF-AUTH-04)
     implementation(libs.qrcodegen)
     include(libs.qrcodegen)
@@ -67,7 +70,8 @@ listOf("runClient", "runClient2").forEach { runTask -> tasks.named<JavaExec>(run
     mapOf("samDevPassword" to "sam.dev.password", "samDevEmail" to "sam.dev.email", "samDevQuitAfterJoin" to "sam.dev.quitAfterJoin",
         "samDevFillOnly" to "sam.dev.fillOnly", "samDevConfirm" to "sam.dev.confirm", "samDevCapsLock" to "sam.dev.capsLock", "samDevScreenshot" to "sam.dev.screenshot", "samDevScreenshotDelay" to "sam.dev.screenshotDelay",
         "samDevLeave" to "sam.dev.leave", "samDevServerList" to "sam.dev.serverList", "samDevRepeat" to "sam.dev.repeat", "samDevAccount" to "sam.dev.account", "samDevAccountPassword" to "sam.dev.accountPassword", "samDevTotpFile" to "sam.dev.totpFile", "samDevCommand" to "sam.dev.command",
-        "samDevScriptsConsent" to "sam.dev.scriptsConsent", "samDevScriptsScreenshot" to "sam.dev.scriptsScreenshot")
+        "samDevScriptsConsent" to "sam.dev.scriptsConsent", "samDevScriptsScreenshot" to "sam.dev.scriptsScreenshot",
+        "samDevWorldScreenshot" to "sam.dev.worldScreenshot")
         .forEach { (property, key) -> (findProperty(property) as String?)?.let { systemProperty(key, it) } }
     (findProperty("samDevServer") as String?)?.let { args("--quickPlayMultiplayer", it) }
     (findProperty("samDevUser") as String?)?.let { args("--username", it) }

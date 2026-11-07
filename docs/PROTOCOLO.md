@@ -690,6 +690,16 @@ Lectura estricta como `signature.json`: como mucho 4 KiB, claves desconocidas, d
 
 Reglas de `commands`: nombre `[a-z][a-z0-9_]{0,31}`; `permission` por defecto 0 (cualquier jugador), 2 a 4 para operadores; como mucho 16 por script. No se puede usar un nombre que ya tiene el servidor (vanilla, otros mods, `sam`) ni el de otro script: el registro falla con su motivo. Los comandos se registran al cargar los scripts (inicio y `/reload`); con `/sam scripts reload` un comando que ya no existe responde que no está disponible hasta el próximo `/reload`.
 
+**API de cliente v0 (borrador, RF-LUA-06).** Corre en el juego del jugador, con la misma sandbox (RS-LUA-01). Las capacidades de servidor (`events`, `players`, `chat`, `commands`) **no existen** en el cliente y las de cliente no existen en el servidor, aunque el manifest las declare.
+
+| Capacidad | Funciones |
+|---|---|
+| (siempre) | `sam.log(texto)`: al log del juego, con el id del script |
+| `scheduler` | `sam.after`, `sam.every` y `sam.cancel`, en ticks del cliente (20 por segundo) |
+| `hud` | `sam.hud.text(id, texto[, {anchor, x, y, color}])` crea o reemplaza un texto en pantalla; `sam.hud.remove(id)` lo quita (devuelve si existía); `sam.hud.clear()` quita todos (devuelve cuántos) |
+
+Reglas de `hud`: `id` `[a-z0-9_]{1,32}`; texto plano ≤ 256 caracteres (sin códigos §); `anchor` uno de `top_left` (por defecto), `top`, `top_right`, `left`, `center`, `right`, `bottom_left`, `bottom`, `bottom_right`; `x` e `y` desplazamientos en píxeles de la GUI desde el ancla (−4096..4096, por defecto 0); `color` `0xRRGGBB` (por defecto blanco); como mucho 64 textos por script. El render **no** ejecuta Lua: dibuja cada frame lo último que los scripts dejaron. Si un script se suspende o falla, sus textos desaparecen. Un script con `hud` nunca dibuja sobre las pantallas de SAM (RS-LUA-07): el HUD solo se dibuja en el mundo, sin pantallas abiertas.
+
 **Vector** (`cryptography` de Python; fijado en `ScriptSignatureTest` y `ScriptSigningTest`): el lockfile de arriba firmado con la clave K1 de la RFC 8032 (`key_id` = `21fe31dfa154a261`):
 
 ```
@@ -698,9 +708,9 @@ Reglas de `commands`: nombre `[a-z][a-z0-9_]{0,31}`; `permission` por defecto 0 
 
 **Resultado de la verificación** (`ScriptVerifier`), en este orden: `MISSING_SIGNATURE`, `MALFORMED_SIGNATURE`, `INVALID_FILES`, `UNKNOWN_KEY`, `LOCK_MISMATCH`, `BAD_SIGNATURE` o válido.
 
-El `sha256` de `ScriptRef` (5.5) es el `lock_sha256`, y el paquete que se transfiere es un archivo `.zip` **sin compresión** con exactamente los archivos del lockfile más `signature.json`. El cliente lo descomprime en memoria con límites de cantidad de archivos (≤ 256) y de tamaño total.
+Lo que se transfiere al cliente es el `ScriptPackage` de 5.5 (los archivos del lockfile más `signature.json`, en su codificación canónica); el `sha256` de `ScriptRef` es el de ese paquete, no el `lock_sha256`. El cliente lo decodifica en memoria con los mismos límites (≤ 257 archivos, ≤ 4 MiB) y después verifica la firma como el servidor.
 
-### 8.3 Claves de `sam-signer`
+### 8.4 Claves de `sam-signer`
 
 - Clave privada en un archivo PKCS#8 cifrado (PBES2, scrypt o PBKDF2-SHA256 con ≥ 600 000 iteraciones) con passphrase (RS-SIG-07).
 - Comandos: `sam-signer keygen`, `sam-signer sign <carpeta>`, `sam-signer verify <carpeta>`, `sam-signer pubkey`.
@@ -727,7 +737,7 @@ Formato del mensaje al jugador: texto traducible + código entre corchetes (por 
 | SAM-C001 | Cliente | La dirección fijada presenta otro `server_id` | Pantalla de advertencia de identidad |
 | SAM-C002 | Cliente | Cambio de clave sin rotación válida | Pantalla de advertencia (RS-NET-08) |
 | SAM-C003 | Cliente | Servidor fijado sin TLS o sin SAM (downgrade) | Pantalla de advertencia (RS-NET-10) |
-| SAM-C004 | Cliente | Firma o hash de script inválido | El script se descarta; si es `required`, desconexión |
+| SAM-C004 | Cliente | Firma o hash de script inválido | El script se descarta y aparece en el consentimiento como no verificado (no se puede aceptar); si es `required`, el servidor aplica su política (`SAM-K010`) |
 
 ---
 

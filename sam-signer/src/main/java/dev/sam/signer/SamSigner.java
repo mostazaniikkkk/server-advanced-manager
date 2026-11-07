@@ -46,9 +46,24 @@ public final class SamSigner {
     public static void main(String[] args) {
         var console = System.console();
         var env = new Env(Path.of("").toAbsolutePath(), System.out,
-            prompt -> console != null ? console.readPassword(prompt) : fromEnvironment(System.getenv()), new SecureRandom(),
+            prompt -> prompt(console == null ? null : text -> console.readPassword("%s", text), System.getenv(), prompt), new SecureRandom(),
             SigningKeyFile.ITERATIONS);
         System.exit(run(args, env));
+    }
+
+    /**
+     * La passphrase de la consola; si no hay, o no se puede leer (Java 22+ da una consola aunque la salida
+     * esté redirigida), de SAM_SIGNER_PASSPHRASE.
+     */
+    static char[] prompt(Function<String, char[]> console, Map<String, String> environment, String prompt) {
+        if (console != null) {
+            try {
+                return console.apply(prompt);
+            } catch (java.io.IOError e) {
+                // Sin terminal real: sigue con el entorno
+            }
+        }
+        return fromEnvironment(environment);
     }
 
     /** Sin consola (por ejemplo en CI), la passphrase puede venir de SAM_SIGNER_PASSPHRASE. */

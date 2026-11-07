@@ -201,6 +201,19 @@ class SamSignerTest {
     }
 
     @Test
+    void siLaConsolaNoSePuedeLeerSeUsaElEntorno() {
+        var entorno = Map.of("SAM_SIGNER_PASSPHRASE", "frase de ci");
+        // Java 22+ da una consola aunque la salida esté redirigida, y leer de ella falla
+        java.util.function.Function<String, char[]> rota = p -> {
+            throw new java.io.IOError(new java.io.IOException("Controlador no válido"));
+        };
+        assertThat(SamSigner.prompt(rota, entorno, "Passphrase: ")).containsExactly("frase de ci".toCharArray());
+        assertThat(SamSigner.prompt(null, entorno, "Passphrase: ")).containsExactly("frase de ci".toCharArray());
+        assertThat(SamSigner.prompt(p -> "de la consola".toCharArray(), entorno, "Passphrase: ")).containsExactly("de la consola".toCharArray());
+        assertThat(SamSigner.prompt(rota, Map.of(), "Passphrase: ")).isNull();
+    }
+
+    @Test
     void leerUnaCarpetaDaLasRutasConBarraNormal() throws Exception {
         var carpeta = script("leer", "x");
         assertThat(SamSigner.readFolder(carpeta)).containsOnlyKeys("manifest.json", "main.lua", "ui/panel.lua");

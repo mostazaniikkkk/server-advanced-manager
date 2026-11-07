@@ -38,7 +38,53 @@ public final class ScriptHost {
     static final int MAX_COMMANDS = 16;
     private static final java.util.regex.Pattern COMMAND = java.util.regex.Pattern.compile("[a-z][a-z0-9_]{0,31}");
     private static final int MAX_LOG = 512;
+    static final int MAX_HUD = 64;
+    private static final int MAX_OFFSET = 4096;
+    private static final java.util.regex.Pattern HUD_ID = java.util.regex.Pattern.compile("[a-z0-9_]{1,32}");
     private static final int MAX_ERRORS = 20;
+
+    /** Dónde se ancla un texto del HUD (API de cliente v0). */
+    public enum Anchor {
+        TOP_LEFT, TOP, TOP_RIGHT, LEFT, CENTER, RIGHT, BOTTOM_LEFT, BOTTOM, BOTTOM_RIGHT;
+
+        String luaName() {
+            return name().toLowerCase(Locale.ROOT);
+        }
+    }
+
+    /** Un texto del HUD de un script: datos que el render dibuja sin ejecutar Lua. */
+    public record HudText(String script, String id, String text, Anchor anchor, int x, int y, int color) {
+    }
+
+    /** El host del cliente: solo las capacidades del cliente (API de cliente v0, PROTOCOLO.md 8.3). */
+    public static ScriptHost client(java.util.function.BiConsumer<String, String> log, ScriptLimits limits) {
+        return new ScriptHost(new Bridge() {
+            @Override
+            public List<Player> players() {
+                return List.of();
+            }
+
+            @Override
+            public void tell(String player, String text) {
+                throw new UnsupportedOperationException("chat no existe en el cliente");
+            }
+
+            @Override
+            public void broadcast(String text) {
+                throw new UnsupportedOperationException("chat no existe en el cliente");
+            }
+
+            @Override
+            public void log(String script, String text) {
+                log.accept(script, text);
+            }
+        }, limits, true);
+    }
+
+    /** Los textos del HUD de los scripts que están corriendo, en orden de carga y de creación. */
+    public synchronized List<HudText> hud() {
+        return scripts.values().stream().filter(l -> l.state == State.RUNNING).flatMap(l -> l.hud.values().stream()).toList();
+    }
 
     /** Un jugador como lo ve Lua: solo copias de valores, nunca objetos de Minecraft (RS-LUA-02c). */
     public record Player(String name, String uuid) {
@@ -91,6 +137,7 @@ public final class ScriptHost {
         final List<String> errors = new ArrayList<>();
         final Map<Event, List<LuaFunction>> handlers = new EnumMap<>(Event.class);
         final Map<Integer, Task> tasks = new TreeMap<>();
+        final Map<String, HudText> hud = new LinkedHashMap<>();
         int nextTask = 1;
 
         Loaded(Package pack) {
@@ -105,14 +152,22 @@ public final class ScriptHost {
 
     private final Bridge bridge;
     private final ScriptLimits limits;
+    /** En el cliente solo existen las capacidades del cliente, y en el servidor las del servidor. */
+    private final boolean client;
     private final Map<String, Loaded> scripts = new LinkedHashMap<>();
     private final Map<String, CommandEntry> commands = new LinkedHashMap<>();
     private java.util.Set<String> reserved = java.util.Set.of();
     private long tick;
 
+    /** El host del servidor. */
     public ScriptHost(Bridge bridge, ScriptLimits limits) {
+        this(bridge, limits, false);
+    }
+
+    private ScriptHost(Bridge bridge, ScriptLimits limits, boolean client) {
         this.bridge = bridge;
         this.limits = limits;
+        this.client = client;
     }
 
     /** Descarta todo lo cargado y carga estos scripts (RF-LUA-02: errores aislados por script). */
@@ -238,7 +293,7 @@ public final class ScriptHost {
             bridge.log(loaded.id(), truncate(string(text), MAX_LOG));
             return Constants.NIL;
         }));
-        if (loaded.manifest.has("events")) {
+        if (!client && loaded.manifest.has("events")) {
             functions.add(RegisteredFunction.of("on", (s, name, fn) -> on(loaded, string(name), fn.checkFunction())));
         }
         if (loaded.manifest.has("scheduler")) {
@@ -249,7 +304,7 @@ public final class ScriptHost {
                 return Constants.NIL;
             }));
         }
-        if (loaded.manifest.has("players")) {
+        if (!client && loaded.manifest.has("players")) {
             functions.add(RegisteredFunction.of("players", s -> {
                 var list = new LuaTable();
                 var players = bridge.players();
@@ -259,7 +314,7 @@ public final class ScriptHost {
                 return list;
             }));
         }
-        if (loaded.manifest.has("chat")) {
+        if (!client && loaded.manifest.has("chat")) {
             functions.add(RegisteredFunction.of("tell", (s, player, text) -> {
                 bridge.tell(string(player), plain(string(text)));
                 return Constants.NIL;
@@ -269,10 +324,22 @@ public final class ScriptHost {
                 return Constants.NIL;
             }));
         }
-        if (loaded.manifest.has("commands")) {
+        if (!client && loaded.manifest.has("commands")) {
             functions.add(RegisteredFunction.ofV("command", (s, args) -> command(loaded, args)));
         }
         RegisteredFunction.bind(sam, functions.toArray(RegisteredFunction[]::new));
+        if (client && loaded.manifest.has("hud")) {
+            var hud = new LuaTable();
+            RegisteredFunction.bind(hud, new RegisteredFunction[] {
+                RegisteredFunction.ofV("text", (s, args) -> hudText(loaded, args)),
+                RegisteredFunction.of("remove", (s, id) -> valueOf(loaded.hud.remove(string(id)) != null)),
+                RegisteredFunction.of("clear", s -> {
+                    var removed = loaded.hud.size();
+                    loaded.hud.clear();
+                    return valueOf(removed);
+                })});
+            sam.rawset("hud", hud);
+        }
         state.globals().rawset("sam", sam);
     }
 
@@ -314,6 +381,43 @@ public final class ScriptHost {
         }
         commands.put(name, new CommandEntry(new Command(name, permission, loaded.id()), loaded, fn));
         return Constants.NONE;
+    }
+
+    /** {@code sam.hud.text(id, texto[, {anchor, x, y, color}])} (API de cliente v0). */
+    private org.squiddev.cobalt.Varargs hudText(Loaded loaded, org.squiddev.cobalt.Varargs args) throws LuaError {
+        var id = string(args.arg(1));
+        var text = plain(string(args.arg(2)));
+        var options = args.arg(3).isNil() ? new LuaTable() : args.arg(3).checkTable();
+        if (!HUD_ID.matcher(id).matches()) {
+            throw new LuaError("id de HUD inválido \"" + id + "\": [a-z0-9_], hasta 32");
+        }
+        var anchorName = options.rawget("anchor");
+        var anchor = Anchor.TOP_LEFT;
+        if (!anchorName.isNil()) {
+            var name = string(anchorName);
+            anchor = java.util.Arrays.stream(Anchor.values()).filter(a -> a.luaName().equals(name)).findFirst()
+                .orElseThrow(() -> new LuaError("ancla desconocida \"" + name + "\""));
+        }
+        var x = offset(options.rawget("x"));
+        var y = offset(options.rawget("y"));
+        var colorValue = options.rawget("color");
+        var color = colorValue.isNil() ? 0xFFFFFF : colorValue.checkInteger();
+        if (color < 0 || color > 0xFFFFFF) {
+            throw new LuaError("color debe ser 0xRRGGBB");
+        }
+        if (!loaded.hud.containsKey(id) && loaded.hud.size() >= MAX_HUD) {
+            throw new LuaError("como mucho " + MAX_HUD + " textos por script");
+        }
+        loaded.hud.put(id, new HudText(loaded.id(), id, text, anchor, x, y, color));
+        return Constants.NONE;
+    }
+
+    private static int offset(LuaValue value) throws LuaError {
+        var offset = value.isNil() ? 0 : value.checkInteger();
+        if (offset < -MAX_OFFSET || offset > MAX_OFFSET) {
+            throw new LuaError("x e y deben estar entre -" + MAX_OFFSET + " y " + MAX_OFFSET);
+        }
+        return offset;
     }
 
     private LuaValue schedule(Loaded loaded, int ticks, LuaFunction fn, boolean repeat) throws LuaError {

@@ -94,7 +94,24 @@ public final class SamClient implements ClientModInitializer {
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
-                client.execute(client::stop);
+                // -Dsam.dev.worldScreenshot=nombre: cierra la pantalla abierta (si otro mod abrió una), espera un
+                // segundo y captura el mundo con el HUD de los scripts antes de cerrar
+                var shot = System.getProperty("sam.dev.worldScreenshot");
+                if (shot != null) {
+                    client.execute(() -> client.setScreen(null));
+                    try {
+                        Thread.sleep(1000);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+                client.execute(() -> {
+                    if (shot != null) {
+                        net.minecraft.client.Screenshot.grab(client.gameDirectory, shot + ".png", client.getMainRenderTarget(),
+                            message -> LOGGER.info("[dev] Captura: {}", message.getString()));
+                    }
+                    client.stop();
+                });
             }, "SAM dev quit");
             timer.setDaemon(true);
             timer.start();
