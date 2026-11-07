@@ -33,6 +33,8 @@ public final class WebSocketClientHandshake extends ByteToMessageDecoder {
     static final String DECODER_NAME = "sam_ws_client_decoder";
 
     private static final byte[] END_OF_HEADER = {'\r', '\n', '\r', '\n'};
+    /** El proxy (CDN, túnel) respondió pero no llegó al servidor; 530 es Cloudflare con el túnel caído. */
+    private static final List<String> PROXY_WITHOUT_ORIGIN = List.of("502", "503", "504", "530");
 
     private final String host;
     private final String path;
@@ -95,6 +97,9 @@ public final class WebSocketClientHandshake extends ByteToMessageDecoder {
         // Con límite -1: una respuesta vacía da una línea de estado vacía, no un arreglo vacío
         var lines = header.split("\r\n", -1);
         if (!lines[0].startsWith("HTTP/1.1 101")) {
+            if (PROXY_WITHOUT_ORIGIN.stream().anyMatch(code -> lines[0].startsWith("HTTP/1.1 " + code + " "))) {
+                return "el servidor de Minecraft no está disponible detrás del proxy (respondió «" + lines[0] + "»)";
+            }
             return "el servidor respondió «" + lines[0] + "» (¿ruta del WebSocket correcta?)";
         }
         var headers = new HashMap<String, String>();

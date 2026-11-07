@@ -171,7 +171,7 @@ public final class SamClientNet {
             new SecureRandom(), tunnel -> tunnel.pipeline().addAfter(tunnel.name(), TLS_NAME, samTls(channel, plan, resume)),
             reason -> {
                 log.warn("WebSocket con {} rechazado: {}", address, reason);
-                fail(channel, "El servidor rechazó la conexión WebSocket: " + reason);
+                fail(channel, "No se pudo conectar por WebSocket: " + reason);
             });
         if (address.transport() != ServerAddress.Transport.WSS) {
             pipeline.addFirst(WebSocketClientHandshake.NAME, handshake);

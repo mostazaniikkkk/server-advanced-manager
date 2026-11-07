@@ -157,6 +157,27 @@ class WebSocketClientHandshakeTest {
     }
 
     @Test
+    void siElProxyNoLlegaAlServidorLoDiceEnVezDeCulparALaRuta() {
+        // 502/503/504 de cualquier proxy; 530 es el de Cloudflare cuando el túnel está caído
+        for (var estado : List.of("502 Bad Gateway", "503 Service Unavailable", "504 Gateway Timeout", "530 ")) {
+            fallas.clear();
+            var canal = cliente("h");
+            salida(canal);
+            canal.writeInbound(Unpooled.wrappedBuffer(("HTTP/1.1 " + estado + "\r\nServer: cloudflare\r\n\r\n")
+                .getBytes(StandardCharsets.US_ASCII)));
+            assertThat(fallas).as(estado).containsExactly(
+                "el servidor de Minecraft no está disponible detrás del proxy (respondió «HTTP/1.1 " + estado + "»)");
+            assertThat(canal.isOpen()).as(estado).isFalse();
+        }
+        // Un 500 o un 5xx sin forma de estado no es "caído": se informa tal cual
+        fallas.clear();
+        var canal = cliente("h");
+        salida(canal);
+        canal.writeInbound(Unpooled.wrappedBuffer("HTTP/1.1 500 Internal Server Error\r\n\r\n".getBytes(StandardCharsets.US_ASCII)));
+        assertThat(fallas).containsExactly("el servidor respondió «HTTP/1.1 500 Internal Server Error» (¿ruta del WebSocket correcta?)");
+    }
+
+    @Test
     void lasCabecerasSeLeenSinDistinguirMayusculasNiEspacios() {
         var canal = cliente("h");
         salida(canal);
