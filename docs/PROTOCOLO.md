@@ -647,6 +647,40 @@ La lectura admite otro orden de claves y espacio en blanco, pero rechaza todo lo
 
 `key_id` = primeros 8 bytes de SHA-256 de la clave pública cruda (32 bytes), en hex. Mensaje firmado: `"SAM-script-v1" ‖ lock_sha256` (32 bytes).
 
+### 8.3 Manifest (`ScriptManifest`, RF-LUA-01)
+
+```json
+{
+  "id": "economia",
+  "version": "1.0.0",
+  "side": "server",
+  "dependencies": [],
+  "capabilities": ["events", "scheduler", "chat"],
+  "required": false
+}
+```
+
+| Campo | Regla |
+|---|---|
+| `id` | `[a-z0-9_]{1,32}`; **igual al nombre de la carpeta** del script (si no, se rechaza: evita confusiones entre lo que se ve y lo que corre) |
+| `version` | texto imprimible ASCII, 1 a 32 caracteres |
+| `side` | `server`, `client` o `both` |
+| `dependencies` | hasta 16 ids de otros scripts (opcional, por defecto vacío) |
+| `capabilities` | hasta 32, cada una `[a-z0-9_:.]{1,48}` y sin repetir (opcional) |
+| `required` | booleano (opcional, por defecto `false`; solo tiene efecto en el cliente, RS-LUA-05) |
+
+Lectura estricta como `signature.json`: como mucho 4 KiB, claves desconocidas, duplicadas o de otro tipo → rechazo. La firma cubre el manifest, porque es un archivo más del lockfile.
+
+**API de servidor v0 (borrador; la definitiva se escribe en la fase 4 a partir de esta POC).** Todo cuelga de la tabla global `sam`. Una función cuya capacidad no se declaró **no existe** para el script.
+
+| Capacidad | Funciones |
+|---|---|
+| (siempre) | `sam.log(texto)`: al log del servidor, con el id del script |
+| `events` | `sam.on(evento, fn)` con `join`, `quit` y `chat`; `fn` recibe una tabla `{name, uuid}` (y el texto en `chat`) |
+| `scheduler` | `sam.after(ticks, fn)` y `sam.every(ticks, fn)`; devuelven un id para `sam.cancel(id)` |
+| `players` | `sam.players()`: lista de `{name, uuid}` de los jugadores en línea |
+| `chat` | `sam.tell(nombre, texto)` y `sam.broadcast(texto)` (texto plano, ≤ 256 caracteres) |
+
 **Vector** (`cryptography` de Python; fijado en `ScriptSignatureTest` y `ScriptSigningTest`): el lockfile de arriba firmado con la clave K1 de la RFC 8032 (`key_id` = `21fe31dfa154a261`):
 
 ```
