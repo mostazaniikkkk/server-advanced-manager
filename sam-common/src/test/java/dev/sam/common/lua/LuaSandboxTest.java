@@ -244,6 +244,14 @@ class LuaSandboxTest {
     }
 
     @Test
+    void losTextosConAcentosVanYVuelvenEnUtf8() {
+        assertThat(f("function f() return 'canción ñ ¿?' end").value()).contains("canción ñ ¿?");
+        assertThat(f("function f() return #'ñ' end").value()).contains("2");
+        assertThat(LuaSandbox.text(LuaSandbox.lua("año"))).isEqualTo("año");
+        assertThat(LuaSandbox.text(org.squiddev.cobalt.ValueFactory.valueOf(3))).isEqualTo("3");
+    }
+
+    @Test
     void timeEsElDeSamEnSegundos() {
         var antes = System.currentTimeMillis() / 1000;
         var t = Long.parseLong(f("function f() return time() end").value().orElseThrow());

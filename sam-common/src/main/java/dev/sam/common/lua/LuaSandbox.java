@@ -69,15 +69,19 @@ public final class LuaSandbox {
     private LuaSandbox() {
     }
 
-    /** El resultado de ejecutar algo: el primer valor devuelto (como texto) o el error. */
-    public record Outcome(Optional<String> value, Optional<String> error) {
+    /**
+     * El resultado de ejecutar algo: el primer valor devuelto (como texto) o el error.
+     *
+     * @param exceeded el error fue por pasarse del tiempo o de la memoria (RS-LUA-03: se suspende)
+     */
+    public record Outcome(Optional<String> value, Optional<String> error, boolean exceeded) {
 
         static Outcome ok(String value) {
-            return new Outcome(Optional.of(value), Optional.empty());
+            return new Outcome(Optional.of(value), Optional.empty(), false);
         }
 
-        static Outcome failed(String error) {
-            return new Outcome(Optional.empty(), Optional.of(error));
+        public static Outcome failed(String error) {
+            return new Outcome(Optional.empty(), Optional.of(error), false);
         }
     }
 
@@ -102,6 +106,7 @@ public final class LuaSandbox {
         private final LongSupplier allocation;
         private volatile long deadline;
         private volatile long allocationStart;
+        private volatile boolean exceeded;
 
         private Script(String id, Map<String, String> files, ScriptLimits limits, LongSupplier nanos, LongSupplier allocation) {
             this.id = id;
@@ -122,12 +127,21 @@ public final class LuaSandbox {
         }
 
         /** Instala la sandbox y ejecuta {@code main.lua}. */
-        public synchronized Outcome start() {
+        public Outcome start() {
+            return start(state -> { });
+        }
+
+        /**
+         * Instala la sandbox, después la API de SAM ({@code api}, antes de que corra nada del script) y
+         * ejecuta {@code main.lua}.
+         */
+        public synchronized Outcome start(java.util.function.Consumer<LuaState> api) {
             try {
                 install();
             } catch (LuaError | CompileException e) {
                 throw new IllegalStateException("la sandbox de Lua no se pudo preparar", e);
             }
+            api.accept(state);
             var main = files.get("main.lua");
             if (main == null) {
                 return Outcome.failed("falta main.lua");
@@ -148,15 +162,20 @@ public final class LuaSandbox {
             return guarded(lua, varargsOf(args));
         }
 
+        /** Llama a una función del script que la API guardó (un manejador de eventos, una tarea). */
+        public synchronized Outcome invoke(LuaFunction function, LuaValue... args) {
+            return guarded(function, varargsOf(args));
+        }
+
         private Outcome guarded(LuaFunction function, Varargs args) {
             arm();
             var alarm = WATCHDOG.scheduleAtFixedRate(state::interrupt, CHECK_EVERY_MS, CHECK_EVERY_MS, TimeUnit.MILLISECONDS);
             try {
                 var result = LuaThread.runMain(state, function, args);
-                return Outcome.ok(result.first().toString());
+                return Outcome.ok(text(result.first()));
             } catch (LuaError e) {
                 // Cobalt ya convierte en LuaError las excepciones Java de la API y el desborde de pila
-                return Outcome.failed(e.getMessage());
+                return new Outcome(Optional.empty(), Optional.of(e.getMessage()), exceeded);
             } finally {
                 alarm.cancel(false);
             }
@@ -164,6 +183,7 @@ public final class LuaSandbox {
 
         /** Empieza una invocación: su plazo y su punto de partida de memoria. */
         void arm() {
+            exceeded = false;
             deadline = nanos.getAsLong() + limits.perCall().toNanos();
             allocationStart = allocation.getAsLong();
         }
@@ -176,10 +196,12 @@ public final class LuaSandbox {
         /** Lo que revisa el vigilante: tiempo y memoria de la invocación en curso. */
         void checkLimits() throws LuaError {
             if (nanos.getAsLong() > deadline) {
+                exceeded = true;
                 throw new LuaError("el script superó su tiempo (" + limits.perCall().toMillis() + " ms)");
             }
             // Si la JVM no informa la memoria del hilo devuelve siempre -1: la diferencia es 0 y solo vale el tiempo
             if (allocation.getAsLong() - allocationStart > limits.allocationBytes()) {
+                exceeded = true;
                 throw new LuaError("el script superó su memoria (" + limits.allocationBytes() / (1024 * 1024) + " MiB)");
             }
         }
@@ -270,6 +292,24 @@ public final class LuaSandbox {
         private LuaFunction compile(String name, String source, LuaTable env) throws CompileException, LuaError {
             return LoadState.load(state, new ByteArrayInputStream(source.getBytes(StandardCharsets.UTF_8)), name, env);
         }
+    }
+
+    /**
+     * Un valor de Lua como texto Java. Los strings de Lua son bytes: se leen como UTF-8 (el
+     * {@code toString} de Cobalt los lee como Latin-1 y rompe los acentos).
+     */
+    public static String text(LuaValue value) {
+        if (value instanceof LuaString string) {
+            var bytes = new byte[string.length()];
+            string.copyTo(0, bytes, 0, bytes.length);
+            return new String(bytes, StandardCharsets.UTF_8);
+        }
+        return value.toString();
+    }
+
+    /** Texto Java como string de Lua, en UTF-8. */
+    public static LuaString lua(String text) {
+        return LuaString.valueOf(text.getBytes(StandardCharsets.UTF_8));
     }
 
     /** Los bytes que asignó este hilo (com.sun.management, presente en HotSpot y OpenJ9); -1 si no lo informa. */
