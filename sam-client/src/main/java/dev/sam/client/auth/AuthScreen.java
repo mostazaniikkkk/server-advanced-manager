@@ -19,6 +19,7 @@ import dev.sam.common.proto.auth.AuthMethod;
 import dev.sam.common.proto.auth.AuthResult;
 import dev.sam.common.proto.auth.Hello;
 import dev.sam.common.proto.auth.LoginPassword;
+import dev.sam.common.proto.auth.LoginTotp;
 import dev.sam.common.proto.auth.Register;
 import net.fabricmc.fabric.api.networking.v1.PacketSender;
 import net.fabricmc.loader.api.FabricLoader;
@@ -72,6 +73,9 @@ public final class AuthScreen extends Screen {
     private Button submit;
     private Button toggle;
     private GoogleButton google;
+    /** Segundo paso del login: el código de 2FA (5.0). */
+    private boolean totpStep;
+    private static final int MAX_CODE = 16;
     private boolean visible;
     private boolean busy;
     private Component status = Component.empty();
@@ -103,15 +107,22 @@ public final class AuthScreen extends Screen {
         // Alto del panel: cabecera, campos (con su validación en la misma línea de la etiqueta),
         // botones, estado y pie. Cabe en la ventana por defecto (854×480 a escala automática).
         var rows = registering ? 3 : 1;
-        panelHeight = HEADER + rows * ROW + 2 + 20 + 30 + (googleOffered() ? 24 : 0);
+        panelHeight = HEADER + rows * ROW + 2 + 20 + 30 + (googleOffered() && !totpStep ? 24 : 0);
         panelTop = Math.max(4, (height - panelHeight) / 2);
         fieldsTop = panelTop + HEADER;
         var x = (width - FIELD_WIDTH) / 2;
 
         var y = fieldsTop + LABEL_GAP;
-        password = masked(x, y, FIELD_WIDTH - TOGGLE_WIDTH - 4, "Tu contraseña");
-        toggle = addRenderableWidget(Button.builder(Component.literal("Ver"), b -> toggleVisible())
-            .bounds(x + FIELD_WIDTH - TOGGLE_WIDTH, y, TOGGLE_WIDTH, 20).build());
+        if (totpStep) {
+            // Segundo paso (5.0): el código de la app o uno de respaldo, sin máscara
+            password = masked(x, y, FIELD_WIDTH, "123456 o un código de respaldo");
+            password.setMaxLength(MAX_CODE);
+            toggle = null;
+        } else {
+            password = masked(x, y, FIELD_WIDTH - TOGGLE_WIDTH - 4, "Tu contraseña");
+            toggle = addRenderableWidget(Button.builder(Component.literal("Ver"), b -> toggleVisible())
+                .bounds(x + FIELD_WIDTH - TOGGLE_WIDTH, y, TOGGLE_WIDTH, 20).build());
+        }
         if (registering) {
             confirm = masked(x, y + ROW, FIELD_WIDTH, "Escríbela otra vez");
             email = new EditBox(font, x, y + 2 * ROW, FIELD_WIDTH, 20, Component.literal("Correo"));
@@ -121,11 +132,11 @@ public final class AuthScreen extends Screen {
             addRenderableWidget(email);
         }
         var buttonsY = fieldsTop + rows * ROW + 2;
-        submit = addRenderableWidget(Button.builder(Component.literal(registering ? "Crear cuenta y entrar" : "Entrar"),
+        submit = addRenderableWidget(Button.builder(Component.literal(totpStep ? "Verificar" : registering ? "Crear cuenta y entrar" : "Entrar"),
             b -> submit()).bounds(x, buttonsY, FIELD_WIDTH * 2 / 3 - 2, 20).build());
         addRenderableWidget(Button.builder(Component.literal("Salir"), b -> leave())
             .bounds(x + FIELD_WIDTH * 2 / 3 + 2, buttonsY, FIELD_WIDTH / 3 - 2, 20).build());
-        if (googleOffered()) {
+        if (googleOffered() && !totpStep) {
             google = addRenderableWidget(new GoogleButton(x, buttonsY + 24, FIELD_WIDTH, 20, Component.literal("Entrar con Google"),
                 this::signInWithGoogle));
         }
@@ -155,6 +166,9 @@ public final class AuthScreen extends Screen {
     }
 
     private void applyMask() {
+        if (totpStep) {
+            return;
+        }
         for (var box : passwordBoxes()) {
             if (visible) {
                 box.setFormatter((text, start) -> FormattedCharSequence.forward(text, Style.EMPTY));
@@ -244,6 +258,13 @@ public final class AuthScreen extends Screen {
         }
         busy = true;
         refresh();
+        if (totpStep) {
+            var code = password.getValue().strip();
+            password.setValue("");
+            setStatus("Verificando el código…", Tone.BUSY);
+            SamClientAuth.send(SamClientAuth.LOGIN_TOTP, new LoginTotp(code)::write);
+            return;
+        }
         setStatus(registering ? "Creando tu cuenta…" : "Comprobando tu contraseña…", Tone.BUSY);
         var chars = password.getValue().toCharArray();
         var mail = registering ? email.getValue().strip() : "";
@@ -274,6 +295,16 @@ public final class AuthScreen extends Screen {
     }
 
     void onResult(AuthResult result) {
+        if (result.status() == AuthResult.Status.NEED_TOTP) {
+            // La contraseña o Google salieron bien; falta el segundo paso
+            totpStep = true;
+            busy = false;
+            setStatus("Abre tu app de autenticación y escribe el código.", Tone.INFO);
+            rebuildWidgets();
+            setFocused(password);
+            devTotp();
+            return;
+        }
         if (result.status() == AuthResult.Status.OK) {
             setStatus(registering ? "¡Cuenta creada! Entrando al mundo…" : "¡Listo! Entrando al mundo…", Tone.OK);
             return;
@@ -364,17 +395,27 @@ public final class AuthScreen extends Screen {
         var headerTop = panelTop + AVATAR + 4;
         graphics.drawCenteredString(font, Component.literal(hello.serverName().isBlank() ? "Servidor" : hello.serverName()),
             center, headerTop + 8, WHITE);
-        var greeting = registering
-            ? "Es tu primera vez aquí, " + nick + ". Crea tu cuenta."
-            : "Hola de nuevo, " + nick + ". Escribe tu contraseña.";
+        String greeting;
+        String help;
+        if (totpStep) {
+            greeting = "Segundo paso, " + nick + ": tu código de 2FA.";
+            help = "Si no tienes el teléfono, usa un código de respaldo.";
+        } else if (registering) {
+            greeting = "Es tu primera vez aquí, " + nick + ". Crea tu cuenta.";
+            help = "La usarás cada vez que entres aquí.";
+        } else {
+            greeting = "Hola de nuevo, " + nick + ". Escribe tu contraseña.";
+            help = "Es la que creaste al registrarte aquí.";
+        }
         graphics.drawCenteredString(font, Component.literal(greeting), center, headerTop + 20, GRAY);
-        var help = registering ? "La usarás cada vez que entres aquí." : "Es la que creaste al registrarte aquí.";
         graphics.drawCenteredString(font, Component.literal(help), center, headerTop + 31, DARK_GRAY);
 
         // Etiquetas de los campos y, a la derecha, su validación en vivo
         var right = x + FIELD_WIDTH;
-        graphics.drawString(font, "Contraseña", x, fieldsTop, WHITE);
-        if (capsLock || Boolean.getBoolean("sam.dev.capsLock") && isDev()) {
+        graphics.drawString(font, totpStep ? "Código de 2FA" : "Contraseña", x, fieldsTop, WHITE);
+        if (totpStep) {
+            // Sin validación en vivo: vale un código de 6 dígitos o uno de respaldo
+        } else if (capsLock || Boolean.getBoolean("sam.dev.capsLock") && isDev()) {
             // Va en la línea de la etiqueta, a la derecha: en el registro, en lugar del contador
             var warning = "⚠ Bloq Mayús activado";
             graphics.drawString(font, warning, right - font.width(warning), fieldsTop, YELLOW);
@@ -425,9 +466,24 @@ public final class AuthScreen extends Screen {
      * {@code -Dsam.dev.password} rellena la pantalla y la envía (o solo la rellena con
      * {@code sam.dev.fillOnly}); {@code sam.dev.confirm} y {@code sam.dev.email} cambian esos campos.
      */
+    /**
+     * {@code -Dsam.dev.totpFile=ruta}: en el segundo paso, calcula el código con el secreto guardado ahí por
+     * el gancho de "Opciones de cuenta" y lo envía.
+     */
+    private void devTotp() {
+        var file = System.getProperty("sam.dev.totpFile");
+        if (!isDev() || file == null) {
+            return;
+        }
+        DevTotp.code(java.nio.file.Path.of(file)).ifPresent(code -> {
+            password.setValue(code);
+            submit();
+        });
+    }
+
     private void devAutofill() {
         var devPassword = System.getProperty("sam.dev.password");
-        if (!isDev() || devPassword == null || busy) {
+        if (!isDev() || devPassword == null || busy || totpStep) {
             return;
         }
         password.setValue(devPassword);

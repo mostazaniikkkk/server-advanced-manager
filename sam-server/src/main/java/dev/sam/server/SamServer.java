@@ -180,7 +180,7 @@ public final class SamServer implements DedicatedServerModInitializer {
                     } catch (IOException e) {
                         throw new UncheckedIOException("No se pudieron guardar las cuentas en " + file, e);
                     }
-                });
+                }, dataVault(config), java.time.Clock.systemUTC());
             AUTH.activate(new SamAuth.Setup(accounts, serverId, policy, google));
             ACCOUNT.activate(new SamAccount.Setup(accounts, google));
             LOGGER.info("Login de SAM abierto: contraseña{}; {} cuentas en {}",
@@ -189,6 +189,28 @@ public final class SamServer implements DedicatedServerModInitializer {
         } catch (IOException | IllegalArgumentException e) {
             LOGGER.error("Cuentas o política de login inválidas: {}. El login de SAM queda cerrado.", e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * La bóveda del 2FA (RS-AUTH-03) con {@code SAM_DATA_KEY}, que solo puede venir del entorno del proceso
+     * (el .env la rechaza, RF-CFG-08). Sin ella el 2FA no se puede activar; el login sigue.
+     */
+    private static java.util.Optional<dev.sam.common.totp.TotpVault> dataVault(Map<String, String> config) {
+        var value = config.get(dev.sam.common.totp.DataKey.ENV);
+        if (value == null || value.isBlank()) {
+            LOGGER.warn("2FA no disponible: falta {} en el entorno del proceso. Valor sugerido (defínelo como variable de "
+                + "entorno, nunca en el .env; guárdalo: sin él no se pueden verificar los 2FA activos): {}",
+                dev.sam.common.totp.DataKey.ENV, dev.sam.common.totp.DataKey.suggest(new SecureRandom()));
+            return java.util.Optional.empty();
+        }
+        try {
+            var key = dev.sam.common.totp.DataKey.parse(value);
+            LOGGER.info("2FA disponible (clave de datos cargada)");
+            return java.util.Optional.of(new dev.sam.common.totp.TotpVault(key, new SecureRandom()));
+        } catch (IllegalArgumentException e) {
+            LOGGER.error("2FA no disponible: {}", e.getMessage());
+            return java.util.Optional.empty();
         }
     }
 

@@ -21,6 +21,8 @@ pitestGradle = "1.19.0"
 jacoco = "0.8.16"
 # Validación del ID token de Google (RS-OAUTH-05): solo en el servidor
 nimbusJoseJwt = "10.10"
+# QR del 2FA en el cliente (MIT, sin dependencias)
+qrcodegen = "1.8.0"
 
 [plugins]
 pitest = { id = "info.solidsoft.pitest", version.ref = "pitestGradle" }
@@ -46,3 +48,4 @@ netty-transport = { module = "io.netty:netty-transport", version.ref = "netty" }
 netty-buffer = { module = "io.netty:netty-buffer", version.ref = "netty" }
 netty-handler = { module = "io.netty:netty-handler", version.ref = "netty" }
 nimbus-jose-jwt = { module = "com.nimbusds:nimbus-jose-jwt", version.ref = "nimbusJoseJwt" }
+qrcodegen = { module = "io.nayuki:qrcodegen", version.ref = "qrcodegen" }

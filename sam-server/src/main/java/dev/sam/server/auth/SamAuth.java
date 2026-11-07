@@ -28,6 +28,7 @@ import dev.sam.common.proto.auth.AuthResult;
 import dev.sam.common.proto.auth.AuthPolicyView;
 import dev.sam.common.proto.auth.HelloAck;
 import dev.sam.common.proto.auth.LoginPassword;
+import dev.sam.common.proto.auth.LoginTotp;
 import dev.sam.common.proto.auth.Register;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
@@ -56,6 +57,7 @@ public final class SamAuth {
     public static final CustomPacketPayload.Type<SamPayload> OAUTH_START = SamPayload.type(OAuthStart.ID);
     public static final CustomPacketPayload.Type<SamPayload> OAUTH_URL = SamPayload.type(OAuthUrl.ID);
     public static final CustomPacketPayload.Type<SamPayload> OAUTH_CODE = SamPayload.type(OAuthCode.ID);
+    public static final CustomPacketPayload.Type<SamPayload> LOGIN_TOTP = SamPayload.type(LoginTotp.ID);
 
     static final ConfigurationTask.Type TASK = new ConfigurationTask.Type("sam:auth");
     static final int TIMEOUT_SECONDS = 120;
@@ -93,6 +95,10 @@ public final class SamAuth {
         PayloadTypeRegistry.configurationC2S().register(LOGIN_PASSWORD, SamPayload.codec(LOGIN_PASSWORD, LoginPassword.MAX_BYTES));
         PayloadTypeRegistry.configurationC2S().register(OAUTH_START, SamPayload.codec(OAUTH_START, OAuthStart.MAX_BYTES));
         PayloadTypeRegistry.configurationC2S().register(OAUTH_CODE, SamPayload.codec(OAUTH_CODE, OAuthCode.MAX_BYTES));
+        PayloadTypeRegistry.configurationC2S().register(LOGIN_TOTP, SamPayload.codec(LOGIN_TOTP, LoginTotp.MAX_BYTES));
+        ServerConfigurationNetworking.registerGlobalReceiver(LOGIN_TOTP,
+            (payload, context) -> receive(context.networkHandler(), context.server(), payload, LoginTotp.MAX_BYTES, LoginTotp::read,
+                LoginFlow::onTotp));
         PayloadTypeRegistry.configurationS2C().register(OAUTH_URL, SamPayload.codec(OAUTH_URL, MAX_SERVER_MESSAGE));
 
         ServerConfigurationConnectionEvents.CONFIGURE.register(this::configure);
@@ -291,9 +297,14 @@ public final class SamAuth {
         return ByteBufUtil.getBytes(buf);
     }
 
-    /** El MOTD acotado a 16 caracteres (≤ 64 bytes en UTF-8). */
-    private static String serverName(MinecraftServer server) {
-        var motd = server.getMotd().replaceAll("§.", "");
+    /**
+     * El nombre del servidor para el jugador: la primera línea del MOTD sin formato y sin lo que va
+     * después de un " | " (el lema), acotado a 16 caracteres (≤ 64 bytes en UTF-8).
+     */
+    public static String serverName(MinecraftServer server) {
+        var motd = server.getMotd().replaceAll("§.", "").split("\n", 2)[0];
+        var bar = motd.indexOf(" | ");
+        motd = (bar > 0 ? motd.substring(0, bar) : motd).strip();
         return motd.codePoints().limit(16).collect(StringBuilder::new, StringBuilder::appendCodePoint, StringBuilder::append)
             .toString();
     }

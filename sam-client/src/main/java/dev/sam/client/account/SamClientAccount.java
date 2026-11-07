@@ -17,6 +17,10 @@ import dev.sam.common.proto.account.AccountUnlink;
 import dev.sam.common.proto.account.OAuthCode;
 import dev.sam.common.proto.account.OAuthStart;
 import dev.sam.common.proto.account.OAuthUrl;
+import dev.sam.common.proto.account.TotpBegin;
+import dev.sam.common.proto.account.TotpConfirm;
+import dev.sam.common.proto.account.TotpDisable;
+import dev.sam.common.proto.account.TotpEnroll;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
@@ -41,6 +45,10 @@ public final class SamClientAccount {
     public static final CustomPacketPayload.Type<SamPayload> OAUTH_START = SamPayload.type(OAuthStart.ID);
     public static final CustomPacketPayload.Type<SamPayload> OAUTH_URL = SamPayload.type(OAuthUrl.ID);
     public static final CustomPacketPayload.Type<SamPayload> OAUTH_CODE = SamPayload.type(OAuthCode.ID);
+    public static final CustomPacketPayload.Type<SamPayload> TOTP_BEGIN = SamPayload.type(TotpBegin.ID);
+    public static final CustomPacketPayload.Type<SamPayload> TOTP_ENROLL = SamPayload.type(TotpEnroll.ID);
+    public static final CustomPacketPayload.Type<SamPayload> TOTP_CONFIRM = SamPayload.type(TotpConfirm.ID);
+    public static final CustomPacketPayload.Type<SamPayload> TOTP_DISABLE = SamPayload.type(TotpDisable.ID);
 
     private static final int MAX_SERVER_MESSAGE = 4096;
 
@@ -56,6 +64,16 @@ public final class SamClientAccount {
         PayloadTypeRegistry.playC2S().register(UNLINK, SamPayload.codec(UNLINK, AccountUnlink.MAX_BYTES));
         PayloadTypeRegistry.playC2S().register(OAUTH_START, SamPayload.codec(OAUTH_START, OAuthStart.MAX_BYTES));
         PayloadTypeRegistry.playC2S().register(OAUTH_CODE, SamPayload.codec(OAUTH_CODE, OAuthCode.MAX_BYTES));
+        PayloadTypeRegistry.playC2S().register(TOTP_BEGIN, SamPayload.codec(TOTP_BEGIN, TotpBegin.MAX_BYTES));
+        PayloadTypeRegistry.playC2S().register(TOTP_CONFIRM, SamPayload.codec(TOTP_CONFIRM, TotpConfirm.MAX_BYTES));
+        PayloadTypeRegistry.playC2S().register(TOTP_DISABLE, SamPayload.codec(TOTP_DISABLE, TotpDisable.MAX_BYTES));
+        PayloadTypeRegistry.playS2C().register(TOTP_ENROLL, SamPayload.codec(TOTP_ENROLL, MAX_SERVER_MESSAGE));
+        ClientPlayNetworking.registerGlobalReceiver(TOTP_ENROLL, (payload, context) -> {
+            var enroll = decode(payload, TotpEnroll::read);
+            if (enroll != null && context.client().screen instanceof AccountScreen screen) {
+                screen.onEnroll(enroll);
+            }
+        });
         PayloadTypeRegistry.playS2C().register(INFO, SamPayload.codec(INFO, MAX_SERVER_MESSAGE));
         PayloadTypeRegistry.playS2C().register(RESULT, SamPayload.codec(RESULT, MAX_SERVER_MESSAGE));
         PayloadTypeRegistry.playS2C().register(OAUTH_URL, SamPayload.codec(OAUTH_URL, MAX_SERVER_MESSAGE));
@@ -64,11 +82,15 @@ public final class SamClientAccount {
             var info = decode(payload, AccountInfo::read);
             if (info != null && context.client().screen instanceof AccountScreen screen) {
                 screen.onInfo(info);
+            } else if (info != null && context.client().screen instanceof TotpEnrollScreen screen) {
+                screen.onInfo(info);
             }
         });
         ClientPlayNetworking.registerGlobalReceiver(RESULT, (payload, context) -> {
             var result = decode(payload, AccountResult::read);
             if (result != null && context.client().screen instanceof AccountScreen screen) {
+                screen.onResult(result);
+            } else if (result != null && context.client().screen instanceof TotpEnrollScreen screen) {
                 screen.onResult(result);
             }
         });
@@ -114,6 +136,14 @@ public final class SamClientAccount {
                 pause(1000);
                 client.execute(() -> client.setScreen(new AccountScreen(client.screen)));
                 pause(2000);
+                if (mode.equals("totp")) {
+                    client.execute(() -> {
+                        if (client.screen instanceof AccountScreen screen) {
+                            screen.devEnableTotp(System.getProperty("sam.dev.password", ""));
+                        }
+                    });
+                    pause(9000);
+                }
                 if (mode.equals("correo")) {
                     client.execute(() -> {
                         if (client.screen instanceof AccountScreen screen) {

@@ -39,6 +39,8 @@ function Secreto($nombre) {
     return ([System.IO.File]::ReadAllText($f)).Trim()
 }
 $env:SAM_IDENTITY_PASSPHRASE = ([System.IO.File]::ReadAllText((Join-Path $ServerDir ".sam-qa-identity-passphrase"))).Trim()
+# Clave de datos del 2FA (RS-AUTH-03), solo de QA y fuera del repositorio; como variable de entorno real
+$env:SAM_DATA_KEY = ([System.IO.File]::ReadAllText((Join-Path $ServerDir ".sam-qa-data-key"))).Trim()
 $password = Secreto ".sam-qa-dev-password"
 $env:SAM_TCP_ENABLED = "true"; $env:SAM_WS_ENABLED = "true"; $env:SAM_WS_PATH = "/qa-ws"
 

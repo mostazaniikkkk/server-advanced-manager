@@ -23,6 +23,8 @@ if ((Get-Content "$Out\rn04-build.log" -Raw) -notmatch "BUILD SUCCESSFUL") { Wri
 if (Get-NetTCPConnection -LocalPort 25567 -State Listen -ErrorAction SilentlyContinue) { Write-Output "RN04: el puerto 25567 está en uso"; exit 1 }
 
 $env:SAM_IDENTITY_PASSPHRASE = ([System.IO.File]::ReadAllText((Join-Path $ServerDir ".sam-qa-identity-passphrase"))).Trim()
+# Clave de datos del 2FA (RS-AUTH-03), solo de QA y fuera del repositorio; como variable de entorno real
+$env:SAM_DATA_KEY = ([System.IO.File]::ReadAllText((Join-Path $ServerDir ".sam-qa-data-key"))).Trim()
 $password = ([System.IO.File]::ReadAllText((Join-Path $ServerDir ".sam-qa-dev-password"))).Trim()
 $env:SAM_TCP_ENABLED = "true"; $env:SAM_WS_ENABLED = "true"; $env:SAM_WS_PATH = "/qa-ws"
 $env:SAM_WS_TRUSTED_PROXIES = "192.0.2.1/32"

@@ -15,6 +15,9 @@ import dev.sam.common.proto.account.AccountUnlink;
 import dev.sam.common.proto.account.OAuthCode;
 import dev.sam.common.proto.account.OAuthProvider;
 import dev.sam.common.proto.account.OAuthStart;
+import dev.sam.common.proto.account.TotpBegin;
+import dev.sam.common.proto.account.TotpDisable;
+import dev.sam.common.proto.account.TotpEnroll;
 import net.minecraft.Util;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -51,6 +54,9 @@ final class AccountScreen extends Screen {
     private EditBox password;
     private Button changeEmail;
     private Button googleButton;
+    private Button totpButton;
+    /** El código de 2FA: solo se ve si la cuenta lo tiene activo (5.0). */
+    private EditBox code;
     private Button toggle;
     private boolean visible;
     private boolean busy;
@@ -91,11 +97,20 @@ final class AccountScreen extends Screen {
             applyMask();
         }).bounds(x + FIELD_WIDTH - 46, top + 56, 46, 20).build());
         applyMask();
+        var codeValue = code == null ? "" : code.getValue();
+        code = new EditBox(font, x + FIELD_WIDTH - 72, top + 56, 72, 20, Component.literal("Código 2FA"));
+        code.setMaxLength(16);
+        code.setHint(Component.literal("Código 2FA").withStyle(s -> s.withColor(DARK_GRAY)));
+        code.setValue(codeValue);
+        code.setResponder(text -> refresh());
+        addRenderableWidget(code);
 
         changeEmail = addRenderableWidget(Button.builder(Component.literal("Cambiar correo"), b -> changeEmail())
             .bounds(x, top + 80, FIELD_WIDTH, 20).build());
         googleButton = addRenderableWidget(Button.builder(Component.literal("Google"), b -> google())
-            .bounds(x, top + 127, FIELD_WIDTH, 20).build());
+            .bounds(x, top + 127, FIELD_WIDTH / 2 - 2, 20).build());
+        totpButton = addRenderableWidget(Button.builder(Component.literal("2FA"), b -> totp())
+            .bounds(x + FIELD_WIDTH / 2 + 2, top + 127, FIELD_WIDTH / 2 - 2, 20).build());
         addRenderableWidget(Button.builder(Component.literal("Volver"), b -> onClose())
             .bounds(x, panelTop + PANEL_HEIGHT - 26, FIELD_WIDTH, 20).build());
         if (info == null) {
@@ -121,6 +136,7 @@ final class AccountScreen extends Screen {
             setStatus(result.detail().orElse("No se pudo completar"), RED);
         }
         password.setValue("");
+        code.setValue("");
         refresh();
     }
 
@@ -129,12 +145,26 @@ final class AccountScreen extends Screen {
             return;
         }
         var loaded = info != null;
+        var totpOn = loaded && info.totp() == AccountInfo.Totp.ON;
+        // Con 2FA, la contraseña comparte la fila con el código
+        var x = (width - FIELD_WIDTH) / 2;
+        code.visible = totpOn;
+        password.setWidth(totpOn ? FIELD_WIDTH - 50 - 76 : FIELD_WIDTH - 50);
+        toggle.setX(totpOn ? x + FIELD_WIDTH - 46 - 76 : x + FIELD_WIDTH - 46);
         var hasPassword = !password.getValue().isEmpty();
-        changeEmail.active = loaded && !busy && hasPassword && EMAIL.matcher(newEmail.getValue().strip()).matches();
+        var credentials = hasPassword && (!totpOn || !code.getValue().isBlank());
+        changeEmail.active = loaded && !busy && credentials && EMAIL.matcher(newEmail.getValue().strip()).matches();
         var google = loaded ? info.google() : AccountInfo.Google.UNAVAILABLE;
         googleButton.visible = google != AccountInfo.Google.UNAVAILABLE;
         googleButton.setMessage(Component.literal(google == AccountInfo.Google.LINKED ? "Desvincular Google" : "Vincular Google"));
-        googleButton.active = loaded && !busy && (google == AccountInfo.Google.AVAILABLE || hasPassword);
+        googleButton.active = loaded && !busy && (google == AccountInfo.Google.AVAILABLE || credentials);
+        var totp = loaded ? info.totp() : AccountInfo.Totp.UNAVAILABLE;
+        totpButton.visible = totp != AccountInfo.Totp.UNAVAILABLE;
+        // Sin Google, el botón del 2FA ocupa la fila entera
+        totpButton.setX(googleButton.visible ? x + FIELD_WIDTH / 2 + 2 : x);
+        totpButton.setWidth(googleButton.visible ? FIELD_WIDTH / 2 - 2 : FIELD_WIDTH);
+        totpButton.setMessage(Component.literal(totpOn ? "Desactivar 2FA" : "Activar 2FA"));
+        totpButton.active = loaded && !busy && (totpOn ? credentials : hasPassword);
     }
 
     private void applyMask() {
@@ -143,12 +173,14 @@ final class AccountScreen extends Screen {
 
     private void changeEmail() {
         var mail = newEmail.getValue().strip();
-        withKey(k -> SamClientAccount.send(SamClientAccount.EMAIL, new AccountEmail(k, mail)::write), "Cambiando tu correo");
+        var second = secondFactor();
+        withKey(k -> SamClientAccount.send(SamClientAccount.EMAIL, new AccountEmail(k, second, mail)::write), "Cambiando tu correo");
     }
 
     private void google() {
         if (info.google() == AccountInfo.Google.LINKED) {
-            withKey(k -> SamClientAccount.send(SamClientAccount.UNLINK, new AccountUnlink(k, OAuthProvider.GOOGLE)::write),
+            var second = secondFactor();
+            withKey(k -> SamClientAccount.send(SamClientAccount.UNLINK, new AccountUnlink(k, second, OAuthProvider.GOOGLE)::write),
                 "Desvinculando Google");
             return;
         }
@@ -174,6 +206,45 @@ final class AccountScreen extends Screen {
                 refresh();
             }
         });
+    }
+
+    /** El código de 2FA si la cuenta lo tiene activo (el servidor lo exige). */
+    private java.util.Optional<String> secondFactor() {
+        var value = code.getValue().strip();
+        code.setValue("");
+        return info.totp() == AccountInfo.Totp.ON && !value.isEmpty() ? java.util.Optional.of(value) : java.util.Optional.empty();
+    }
+
+    /** Activar (con la contraseña; sigue en la pantalla del QR) o desactivar (contraseña y código). */
+    private void totp() {
+        if (info.totp() == AccountInfo.Totp.ON) {
+            var value = code.getValue().strip();
+            code.setValue("");
+            withKey(k -> SamClientAccount.send(SamClientAccount.TOTP_DISABLE, new TotpDisable(k, value)::write), "Desactivando el 2FA");
+        } else {
+            withKey(k -> SamClientAccount.send(SamClientAccount.TOTP_BEGIN, new TotpBegin(k)::write), "Preparando el 2FA");
+        }
+    }
+
+    /** Llegó el QR: se sigue en su pantalla. */
+    void onEnroll(TotpEnroll enroll) {
+        busy = false;
+        setStatus("", YELLOW);
+        refresh();
+        minecraft.setScreen(new TotpEnrollScreen(this, enroll));
+    }
+
+    void onTotpEnabled() {
+        setStatus("2FA activado. Desde ahora se pedirá al entrar.", GREEN);
+    }
+
+    /** Solo para el gancho de desarrollo: activa el 2FA con la contraseña. */
+    void devEnableTotp(String devPassword) {
+        password.setValue(devPassword);
+        refresh();
+        if (totpButton.active) {
+            totp();
+        }
     }
 
     /** Deriva K de la contraseña escrita (PROTOCOLO.md 6.1) fuera del hilo de render y la envía. */
@@ -254,7 +325,8 @@ final class AccountScreen extends Screen {
         var email = info == null ? "…" : info.email() + (info.emailVerified() ? "" : "  (sin verificar)");
         graphics.drawString(font, "Correo: " + email, x, top, GRAY);
         graphics.drawString(font, "Correo nuevo", x, top + 12, WHITE);
-        graphics.drawString(font, "Tu contraseña (para confirmar)", x, top + 46, WHITE);
+        graphics.drawString(font, info != null && info.totp() == AccountInfo.Totp.ON ? "Tu contraseña y tu código (para confirmar)"
+            : "Tu contraseña (para confirmar)", x, top + 46, WHITE);
         graphics.drawString(font, "No hace falta acceso a tu correo anterior.", x, top + 103, DARK_GRAY);
 
         var google = info == null ? "…" : switch (info.google()) {
@@ -262,7 +334,13 @@ final class AccountScreen extends Screen {
             case AVAILABLE -> "Google: sin vincular";
             case UNAVAILABLE -> "Google: no disponible en este servidor";
         };
-        graphics.drawString(font, google, x, top + 116, info != null && info.google() == AccountInfo.Google.LINKED ? GREEN : GRAY);
+        var totpText = info == null ? "" : switch (info.totp()) {
+            case ON -> " · 2FA: activo ✔";
+            case OFF -> " · 2FA: apagado";
+            case UNAVAILABLE -> " · 2FA: no disponible";
+        };
+        graphics.drawString(font, google.replace("Google: no disponible en este servidor", "Google: no disponible") + totpText, x, top + 116,
+            info != null && (info.google() == AccountInfo.Google.LINKED || info.totp() == AccountInfo.Totp.ON) ? GREEN : GRAY);
         if (!status.isEmpty()) {
             graphics.drawCenteredString(font, status, center, top + 152, statusColor);
         }

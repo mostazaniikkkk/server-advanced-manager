@@ -22,6 +22,9 @@ dependencies {
     include(libs.bouncycastle.util)
     implementation(libs.netty.codec.http)
     include(libs.netty.codec.http)
+    // QR del 2FA (RF-AUTH-04)
+    implementation(libs.qrcodegen)
+    include(libs.qrcodegen)
 }
 
 // Gradle corre sobre JDK 25 (Loom 1.19 lo exige); se compila para Java 21
@@ -55,7 +58,7 @@ loom {
 listOf("runClient", "runClient2").forEach { runTask -> tasks.named<JavaExec>(runTask) {
     mapOf("samDevPassword" to "sam.dev.password", "samDevEmail" to "sam.dev.email", "samDevQuitAfterJoin" to "sam.dev.quitAfterJoin",
         "samDevFillOnly" to "sam.dev.fillOnly", "samDevConfirm" to "sam.dev.confirm", "samDevCapsLock" to "sam.dev.capsLock", "samDevScreenshot" to "sam.dev.screenshot", "samDevScreenshotDelay" to "sam.dev.screenshotDelay",
-        "samDevLeave" to "sam.dev.leave", "samDevServerList" to "sam.dev.serverList", "samDevRepeat" to "sam.dev.repeat", "samDevAccount" to "sam.dev.account", "samDevAccountPassword" to "sam.dev.accountPassword")
+        "samDevLeave" to "sam.dev.leave", "samDevServerList" to "sam.dev.serverList", "samDevRepeat" to "sam.dev.repeat", "samDevAccount" to "sam.dev.account", "samDevAccountPassword" to "sam.dev.accountPassword", "samDevTotpFile" to "sam.dev.totpFile")
         .forEach { (property, key) -> (findProperty(property) as String?)?.let { systemProperty(key, it) } }
     (findProperty("samDevServer") as String?)?.let { args("--quickPlayMultiplayer", it) }
     (findProperty("samDevUser") as String?)?.let { args("--username", it) }

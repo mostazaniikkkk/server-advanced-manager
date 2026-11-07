@@ -25,6 +25,10 @@ import dev.sam.common.proto.account.OAuthCode;
 import dev.sam.common.proto.account.OAuthProvider;
 import dev.sam.common.proto.account.OAuthStart;
 import dev.sam.common.proto.account.OAuthUrl;
+import dev.sam.common.proto.account.TotpBegin;
+import dev.sam.common.proto.account.TotpConfirm;
+import dev.sam.common.proto.account.TotpDisable;
+import dev.sam.common.proto.account.TotpEnroll;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
@@ -48,6 +52,10 @@ public final class SamAccount {
     public static final CustomPacketPayload.Type<SamPayload> EMAIL = SamPayload.type(AccountEmail.ID);
     public static final CustomPacketPayload.Type<SamPayload> UNLINK = SamPayload.type(AccountUnlink.ID);
     public static final CustomPacketPayload.Type<SamPayload> RESULT = SamPayload.type(AccountResult.ID);
+    public static final CustomPacketPayload.Type<SamPayload> TOTP_BEGIN = SamPayload.type(TotpBegin.ID);
+    public static final CustomPacketPayload.Type<SamPayload> TOTP_ENROLL = SamPayload.type(TotpEnroll.ID);
+    public static final CustomPacketPayload.Type<SamPayload> TOTP_CONFIRM = SamPayload.type(TotpConfirm.ID);
+    public static final CustomPacketPayload.Type<SamPayload> TOTP_DISABLE = SamPayload.type(TotpDisable.ID);
 
     private static final int MAX_SERVER_MESSAGE = 4096;
     private static final String GOOGLE_DISABLED = "Google no está habilitado en este servidor";
@@ -75,6 +83,10 @@ public final class SamAccount {
         PayloadTypeRegistry.playC2S().register(UNLINK, SamPayload.codec(UNLINK, AccountUnlink.MAX_BYTES));
         PayloadTypeRegistry.playC2S().register(SamAuth.OAUTH_START, SamPayload.codec(SamAuth.OAUTH_START, OAuthStart.MAX_BYTES));
         PayloadTypeRegistry.playC2S().register(SamAuth.OAUTH_CODE, SamPayload.codec(SamAuth.OAUTH_CODE, OAuthCode.MAX_BYTES));
+        PayloadTypeRegistry.playC2S().register(TOTP_BEGIN, SamPayload.codec(TOTP_BEGIN, TotpBegin.MAX_BYTES));
+        PayloadTypeRegistry.playC2S().register(TOTP_CONFIRM, SamPayload.codec(TOTP_CONFIRM, TotpConfirm.MAX_BYTES));
+        PayloadTypeRegistry.playC2S().register(TOTP_DISABLE, SamPayload.codec(TOTP_DISABLE, TotpDisable.MAX_BYTES));
+        PayloadTypeRegistry.playS2C().register(TOTP_ENROLL, SamPayload.codec(TOTP_ENROLL, MAX_SERVER_MESSAGE));
         PayloadTypeRegistry.playS2C().register(INFO, SamPayload.codec(INFO, MAX_SERVER_MESSAGE));
         PayloadTypeRegistry.playS2C().register(RESULT, SamPayload.codec(RESULT, MAX_SERVER_MESSAGE));
         PayloadTypeRegistry.playS2C().register(SamAuth.OAUTH_URL, SamPayload.codec(SamAuth.OAUTH_URL, MAX_SERVER_MESSAGE));
@@ -91,14 +103,48 @@ public final class SamAccount {
             var change = decode(context.player(), payload, AccountEmail.MAX_BYTES, AccountEmail::read);
             if (change != null) {
                 withPassword(context.player(), context.server(), ready, () -> ready.accounts().changeEmail(nick(context.player()),
-                    change.k(), change.email()), "cambió su correo");
+                    change.k(), change.code(), change.email()), "cambió su correo");
             }
         }));
         ServerPlayNetworking.registerGlobalReceiver(UNLINK, (payload, context) -> withSetup(context.player(), ready -> {
             var unlink = decode(context.player(), payload, AccountUnlink.MAX_BYTES, AccountUnlink::read);
             if (unlink != null) {
                 withPassword(context.player(), context.server(), ready, () -> ready.accounts().unlink(nick(context.player()),
-                    unlink.k(), unlink.provider()), "desvinculó " + unlink.provider());
+                    unlink.k(), unlink.code(), unlink.provider()), "desvinculó " + unlink.provider());
+            }
+        }));
+        // 2FA (RF-AUTH-04): activar con la contraseña, confirmar con el primer código, desactivar con ambos
+        ServerPlayNetworking.registerGlobalReceiver(TOTP_BEGIN, (payload, context) -> withSetup(context.player(), ready -> {
+            var begin = decode(context.player(), payload, TotpBegin.MAX_BYTES, TotpBegin::read);
+            if (begin == null) {
+                return;
+            }
+            var player = context.player();
+            var issuer = SamAuth.serverName(context.server());
+            hashing.execute(() -> {
+                var started = ready.accounts().beginTotp(nick(player), begin.k(), issuer.isBlank() ? "Minecraft" : issuer);
+                context.server().execute(() -> {
+                    if (player.hasDisconnected() || countFailure(player, started.result())) {
+                        return;
+                    }
+                    started.enrollment().ifPresentOrElse(
+                        enrollment -> send(player, TOTP_ENROLL, new TotpEnroll(enrollment.uri(), enrollment.backupCodes())::write),
+                        () -> send(player, RESULT, started.result()::write));
+                });
+            });
+        }));
+        ServerPlayNetworking.registerGlobalReceiver(TOTP_CONFIRM, (payload, context) -> withSetup(context.player(), ready -> {
+            var confirm = decode(context.player(), payload, TotpConfirm.MAX_BYTES, TotpConfirm::read);
+            if (confirm != null) {
+                withPassword(context.player(), context.server(), ready, () -> ready.accounts().confirmTotp(nick(context.player()),
+                    confirm.code()), "activó el 2FA");
+            }
+        }));
+        ServerPlayNetworking.registerGlobalReceiver(TOTP_DISABLE, (payload, context) -> withSetup(context.player(), ready -> {
+            var disable = decode(context.player(), payload, TotpDisable.MAX_BYTES, TotpDisable::read);
+            if (disable != null) {
+                withPassword(context.player(), context.server(), ready, () -> ready.accounts().disableTotp(nick(context.player()),
+                    disable.k(), disable.code()), "desactivó el 2FA");
             }
         }));
         ServerPlayNetworking.registerGlobalReceiver(SamAuth.OAUTH_START, (payload, context) -> withSetup(context.player(), ready -> {
@@ -163,18 +209,34 @@ public final class SamAccount {
                 }
                 var nick = nick(player);
                 if (result.status() == AccountResult.Status.OK) {
-                    failures.remove(player.getUUID());
                     log.info("[auditoría] {} {}", nick, audit);
-                } else if (result.detail().filter(AccountService.WRONG_PASSWORD::equals).isPresent()
-                        && failures.merge(player.getUUID(), 1, Integer::sum) >= SamAuth.MAX_ATTEMPTS) {
-                    log.info("[auditoría] {} expulsado: {}", nick, LoginFlow.KICK_TOO_MANY);
-                    player.connection.disconnect(Component.literal(LoginFlow.KICK_TOO_MANY));
+                }
+                if (countFailure(player, result)) {
                     return;
                 }
                 send(player, RESULT, result::write);
                 sendInfo(player, ready);
             });
         });
+    }
+
+    /**
+     * Una contraseña o un código equivocados cuentan para SAM-K004; un OK reinicia la cuenta.
+     *
+     * @return {@code true} si el jugador fue expulsado
+     */
+    private boolean countFailure(ServerPlayer player, AccountResult result) {
+        if (result.status() == AccountResult.Status.OK) {
+            failures.remove(player.getUUID());
+            return false;
+        }
+        var wrong = result.detail().filter(d -> d.equals(AccountService.WRONG_PASSWORD) || d.equals(AccountService.WRONG_CODE));
+        if (wrong.isPresent() && failures.merge(player.getUUID(), 1, Integer::sum) >= SamAuth.MAX_ATTEMPTS) {
+            log.info("[auditoría] {} expulsado: {}", nick(player), LoginFlow.KICK_TOO_MANY);
+            player.connection.disconnect(Component.literal(LoginFlow.KICK_TOO_MANY));
+            return true;
+        }
+        return false;
     }
 
     private void sendInfo(ServerPlayer player, Setup ready) {
