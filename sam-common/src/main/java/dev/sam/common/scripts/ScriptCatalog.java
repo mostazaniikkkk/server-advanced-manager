@@ -25,7 +25,7 @@ import dev.sam.common.lua.ScriptHost;
 public final class ScriptCatalog {
 
     private static final Pattern FOLDER = Pattern.compile("[a-z0-9_]{1,32}");
-    private static final String MANIFEST = "manifest.json";
+    static final String MANIFEST = "manifest.json";
 
     public record Rejected(String id, String reason) {
     }
@@ -82,13 +82,18 @@ public final class ScriptCatalog {
         if (!manifest.runsOnServer()) {
             return java.util.Optional.empty();
         }
+        return java.util.Optional.of(new ScriptHost.Package(manifest, sources(files)));
+    }
+
+    /** Los módulos {@code .lua} del script, en orden de ruta; lanza si alguno no es UTF-8 (también lo usa el cliente). */
+    static Map<String, String> sources(Map<String, byte[]> files) {
         var sources = new LinkedHashMap<String, String>();
         for (var file : new TreeMap<>(files).entrySet()) {
             if (file.getKey().endsWith(".lua")) {
                 sources.put(file.getKey(), utf8(file.getKey(), file.getValue()));
             }
         }
-        return java.util.Optional.of(new ScriptHost.Package(manifest, sources));
+        return sources;
     }
 
     /** El motivo de un rechazo de firma, para el operador (también lo usa sam-signer). */
