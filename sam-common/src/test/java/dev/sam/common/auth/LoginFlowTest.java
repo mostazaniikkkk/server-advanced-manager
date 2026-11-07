@@ -20,6 +20,7 @@ import dev.sam.common.proto.auth.AuthResult.Status;
 import dev.sam.common.proto.auth.EmailVerify;
 import dev.sam.common.proto.auth.HelloAck;
 import dev.sam.common.proto.auth.LoginPassword;
+import dev.sam.common.proto.auth.LoginTotp;
 import dev.sam.common.proto.auth.ProtocolVersion;
 import dev.sam.common.proto.auth.Register;
 
@@ -58,6 +59,85 @@ class LoginFlowTest {
         assertThat(hello.accountState()).isEqualTo(AccountState.REGISTERED);
         assertThat(hello.policy()).isEqualTo(POLITICA);
         assertThat(flujo("Alex").hello().accountState()).isEqualTo(AccountState.NEW);
+    }
+
+    // ===== 2FA como segundo paso (5.0, PROTOCOLO.md 5.3) =====
+
+    /** Una cuenta con el 2FA activo; devuelve el secreto para generar códigos. */
+    private byte[] conDosFA(AccountService servicio) {
+        servicio.register("Steve", k(1), "s@e.com");
+        servicio.linkGoogle("steve", "sub-steve");
+        var inicio = servicio.beginTotp("steve", k(1), "S");
+        var secreto = AccountTotpTest.secreto(inicio.enrollment().orElseThrow().uri());
+        var paso = java.time.Instant.now().getEpochSecond() / dev.sam.common.totp.Totp.PERIOD_SECONDS;
+        assertThat(servicio.confirmTotp("steve", dev.sam.common.totp.Totp.code(secreto, paso)).status())
+            .isEqualTo(dev.sam.common.proto.account.AccountResult.Status.OK);
+        return secreto;
+    }
+
+    private static String siguiente(byte[] secreto) {
+        // El de la confirmación ya se usó: vale el siguiente paso (ventana de ±1)
+        var paso = java.time.Instant.now().getEpochSecond() / dev.sam.common.totp.Totp.PERIOD_SECONDS;
+        return dev.sam.common.totp.Totp.code(secreto, paso + 1);
+    }
+
+    private AccountService conBoveda() {
+        return new AccountService(List.of(), new Argon2Params(8, 1, 1), new SecureRandom(), c -> { },
+            Optional.of(new dev.sam.common.totp.TotpVault(dev.sam.common.totp.DataKey.parse(
+                dev.sam.common.totp.DataKey.suggest(new SecureRandom())), new SecureRandom())), java.time.Clock.systemUTC());
+    }
+
+    private static LoginFlow.Reply necesitaCodigo() {
+        return new LoginFlow.Reply(Optional.of(new AuthResult(Status.NEED_TOTP, Optional.empty(), Optional.empty())),
+            Optional.empty(), false);
+    }
+
+    @Test
+    void conDosFALaContrasenaPideElCodigoComoSegundoPaso() {
+        var servicio = conBoveda();
+        var secreto = conDosFA(servicio);
+        var flujo = new LoginFlow("STEVE", ID, "S", POLITICA, servicio, 3);
+        flujo.hello();
+        flujo.onHelloAck(ACK);
+        assertThat(flujo.onLogin(new LoginPassword(k(1), Optional.empty()))).isEqualTo(necesitaCodigo());
+        assertThat(flujo.done()).isFalse();
+        fueraDeEstado(() -> flujo.onLogin(new LoginPassword(k(1), Optional.empty())));
+        fueraDeEstado(flujo::startOAuth);
+        var malo = flujo.onTotp(new LoginTotp("000000".equals(siguiente(secreto)) ? "111111" : "000000"));
+        assertThat(malo.result().get().status()).isEqualTo(Status.FAILED);
+        assertThat(malo.result().get().detail()).contains(dev.sam.common.auth.AccountService.WRONG_CODE);
+        assertThat(malo.done()).isFalse();
+        var bueno = flujo.onTotp(new LoginTotp(siguiente(secreto)));
+        assertThat(bueno.result().get().status()).isEqualTo(Status.OK);
+        assertThat(bueno.done()).isTrue();
+        assertThat(flujo.done()).isTrue();
+        fueraDeEstado(() -> flujo.onTotp(new LoginTotp("123456")));
+    }
+
+    @Test
+    void conDosFAGoogleTambienPideElCodigo() {
+        var servicio = conBoveda();
+        var secreto = conDosFA(servicio);
+        var flujo = new LoginFlow("Steve", ID, "S", POLITICA, servicio, 3);
+        flujo.hello();
+        flujo.onHelloAck(ACK);
+        fueraDeEstado(() -> flujo.onTotp(new LoginTotp("123456")));
+        assertThat(flujo.onGoogle(Optional.of("sub-steve"))).isEqualTo(necesitaCodigo());
+        assertThat(flujo.onTotp(new LoginTotp(siguiente(secreto))).done()).isTrue();
+    }
+
+    @Test
+    void losCodigosMalosCuentanParaElTopeDeIntentos() {
+        var servicio = conBoveda();
+        conDosFA(servicio);
+        var flujo = new LoginFlow("Steve", ID, "S", POLITICA, servicio, 3);
+        flujo.hello();
+        flujo.onHelloAck(ACK);
+        flujo.onLogin(new LoginPassword(k(9), Optional.empty()));
+        flujo.onLogin(new LoginPassword(k(1), Optional.empty()));
+        assertThat(flujo.onTotp(new LoginTotp("abc")).kick()).as("segundo fallo").isEmpty();
+        var tercero = flujo.onTotp(new LoginTotp("abc"));
+        assertThat(tercero.kick()).contains(LoginFlow.KICK_TOO_MANY);
     }
 
     // ===== Entrar con Google (REQUERIMIENTOS 5.5) =====

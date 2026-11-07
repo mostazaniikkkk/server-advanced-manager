@@ -11,6 +11,8 @@ import dev.sam.common.proto.auth.AuthResult.Status;
 import dev.sam.common.proto.auth.Hello;
 import dev.sam.common.proto.auth.HelloAck;
 import dev.sam.common.proto.auth.LoginPassword;
+import dev.sam.common.proto.auth.LoginTotp;
+import dev.sam.common.proto.account.AccountResult;
 import dev.sam.common.proto.auth.ProtocolVersion;
 import dev.sam.common.proto.auth.Register;
 
@@ -37,7 +39,7 @@ public final class LoginFlow {
     public record Reply(Optional<AuthResult> result, Optional<String> kick, boolean done) {
     }
 
-    private enum State { NEW, HELLO_SENT, AUTH, DONE, CLOSED }
+    private enum State { NEW, HELLO_SENT, AUTH, TOTP, DONE, CLOSED }
 
     private final String nick;
     private final ServerId serverId;
@@ -111,15 +113,38 @@ public final class LoginFlow {
         return new AuthResult(Status.FAILED, Optional.empty(), Optional.of(detail));
     }
 
+    /** El segundo paso (5.0): el código de la app o uno de respaldo. */
+    public synchronized Reply onTotp(LoginTotp totp) {
+        expect(State.TOTP);
+        var checked = accounts.verifyTotp(nick, totp.code());
+        if (checked.status() == AccountResult.Status.OK) {
+            return done(new AuthResult(Status.OK, Optional.empty(), Optional.empty()));
+        }
+        return failure(failed(checked.detail().orElse(AccountService.WRONG_CODE)));
+    }
+
     public synchronized boolean done() {
         return state == State.DONE;
     }
 
+    /** Primer paso: si salió bien y la cuenta tiene 2FA, falta el código (5.0). */
     private Reply conclude(AuthResult result) {
-        if (result.status() == Status.OK) {
-            state = State.DONE;
-            return new Reply(Optional.of(result), Optional.empty(), true);
+        if (result.status() != Status.OK) {
+            return failure(result);
         }
+        if (accounts.hasTotp(nick)) {
+            state = State.TOTP;
+            return new Reply(Optional.of(new AuthResult(Status.NEED_TOTP, Optional.empty(), Optional.empty())), Optional.empty(), false);
+        }
+        return done(result);
+    }
+
+    private Reply done(AuthResult result) {
+        state = State.DONE;
+        return new Reply(Optional.of(result), Optional.empty(), true);
+    }
+
+    private Reply failure(AuthResult result) {
         if (++failures >= maxAttempts) {
             state = State.CLOSED;
             return new Reply(Optional.of(result), Optional.of(KICK_TOO_MANY), false);

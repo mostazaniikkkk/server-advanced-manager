@@ -160,6 +160,15 @@ class AuthMessagesTest {
     }
 
     @Test
+    void elSegundoPasoLlevaElCodigo() {
+        for (var codigo : List.of("012345", "abcd-efgh", "x".repeat(16))) {
+            var mensaje = new LoginTotp(codigo);
+            assertThat(leer(escribir(mensaje::write), LoginTotp.MAX_BYTES, LoginTotp::read)).isEqualTo(mensaje);
+        }
+        malFormado(w -> w.string("x".repeat(17), 17), LoginTotp::read, "largo 17 fuera de 0..16");
+    }
+
+    @Test
     void elResultadoVaYVuelveYSuDetalleEsCorto() {
         for (var resultado : List.of(new AuthResult(AuthResult.Status.OK, Optional.empty(), Optional.empty()),
                 new AuthResult(AuthResult.Status.LOCKED, Optional.of(900), Optional.of("Demasiados intentos")))) {

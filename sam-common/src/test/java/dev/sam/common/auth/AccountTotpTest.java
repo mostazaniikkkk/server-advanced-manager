@@ -73,7 +73,7 @@ class AccountTotpTest {
     }
 
     /** El secreto, sacado de la URI otpauth del QR (como lo haría la app). */
-    private static byte[] secreto(String uri) {
+    static byte[] secreto(String uri) {
         var base32 = uri.replaceAll(".*[?&]secret=([A-Z2-7]+).*", "$1");
         var alfabeto = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
         var salida = new java.io.ByteArrayOutputStream();
