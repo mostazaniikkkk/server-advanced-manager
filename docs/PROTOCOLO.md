@@ -433,10 +433,10 @@ S → C  sam:scripts_offer
                           sha256    bytes[32]             (del paquete del script, 8.2)
                           size      VarInt
                           required  bool
-                          caps      List<String ≤ 32> ≤ 32
+                          caps      List<String ≤ 48> ≤ 32
 
 C → S  sam:scripts_want        hashes: List<bytes[32]> ≤ 128      (los que no tiene en caché)
-S → C  sam:script_chunk        sha256, index: VarInt, total: VarInt, data: bytes ≤ 256 KiB
+S → C  sam:script_chunk        sha256, index: VarInt, total: VarInt, data: bytes ≤ 128 KiB
           (el cliente verifica firma y hash al completar cada script; ver RS-SIG-05 y RF-LUA-05)
           → pantalla de consentimiento (protegida)
 C → S  sam:scripts_consent     accepted: List<String id> ≤ 128
@@ -445,6 +445,8 @@ S → C  sam:done                (o kick SAM-K010 según SAM_SCRIPTS_CLIENT_ON_R
 
 Límite total de descarga por conexión: 16 MiB (configurable). Los fragmentos fuera de orden o de un hash no ofrecido → `SAM-P002`.
 
+**Paquete de un script** (`ScriptPackage`, lo que viaja en los fragmentos y lo que identifica `sha256`): con el codec de 4.1, `List ≤ 257` de `(path: String ≤ 256, data: bytes ≤ 512 KiB)`, **ordenada** por los bytes UTF-8 de la ruta y sin rutas repetidas, con todos los archivos del script (incluido `signature.json`). Como mucho 4 MiB por script. `sha256` = SHA-256 de esos bytes. Una lista desordenada o con una ruta inválida (`ScriptPath`, 8.2) se rechaza: así cada script tiene un solo paquete posible y un solo hash. En el cliente, la verificación es doble (RS-SIG-05): la `keylist` firmada por el servidor fijado, y el script firmado por una clave de esa lista; ambas en cada carga desde la caché (RN-31).
+
 ### 5.6 Límites por mensaje del cliente
 
 | Mensaje | Máximo |
@@ -452,7 +454,8 @@ Límite total de descarga por conexión: 16 MiB (configurable). Los fragmentos f
 | `sam:hello_ack`, `sam:device_proof` | 512 B |
 | `sam:register`, `sam:login_*`, `sam:recovery_*`, `sam:email_verify`, `sam:totp_confirm` | 512 B |
 | `sam:oauth_code` | 1,5 KiB |
-| `sam:scripts_want`, `sam:scripts_consent` | 4 KiB |
+| `sam:scripts_want` | 4,5 KiB |
+| `sam:scripts_consent` | 8,5 KiB |
 | `sam:lua_msg` (play) | 4 KiB, con rate limit por script |
 
 ### 5.7 Fase play
