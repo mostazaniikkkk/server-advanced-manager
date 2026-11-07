@@ -414,6 +414,10 @@ public final class AuthScreen extends Screen {
             leave();
             return;
         }
+        // {@code -Dsam.dev.repeat=true}: si el intento falló, lo reenvía cada 20 ticks (prueba del tope de intentos)
+        if (isDev() && Boolean.getBoolean("sam.dev.repeat") && !busy && ticks % 20 == 0) {
+            devAutofill();
+        }
         var name = System.getProperty("sam.dev.screenshot");
         if (isDev() && name != null && ticks == Integer.getInteger("sam.dev.screenshotDelay", 30)) {
             Screenshot.grab(minecraft.gameDirectory, name + ".png", minecraft.getMainRenderTarget(),
