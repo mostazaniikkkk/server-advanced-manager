@@ -29,7 +29,7 @@ class VanillaClientQaTest {
 
             var respuesta = leerFrame(socket.getInputStream());
             assertThat(respuesta.id()).isZero();
-            assertThat(respuesta.texto()).contains("SAM QA").contains("\"protocol\":" + PROTOCOL_1_21_1);
+            assertThat(respuesta.texto()).contains(QaWire.motd()).contains("\"protocol\":" + PROTOCOL_1_21_1);
             // También en claro: así un cliente SAM sabe que debe conectar por TLS (PROTOCOLO.md 2.4)
             assertThat(respuesta.texto()).containsPattern("\"sam\":\\{\"v\":\"1\\.0\",\"id\":\"[0-9a-f]{32}\",\"tls\":true\\}");
         }
@@ -97,7 +97,7 @@ class VanillaClientQaTest {
             try (var socket = conectar()) {
                 socket.getOutputStream().write(concat(handshake(1), STATUS_REQUEST));
                 var respuesta = leerFrame(socket.getInputStream());
-                assertThat(respuesta.texto()).contains("SAM QA");
+                assertThat(respuesta.texto()).contains(QaWire.motd());
                 return;
             } catch (IOException todaviaLleno) {
                 if (System.nanoTime() > limite) {

@@ -70,7 +70,7 @@ class SamClientTlsQaTest {
             conexion.enviar(handshake(1), QaWire.STATUS_REQUEST);
             var respuesta = leerFrame(conexion.entrada());
             assertThat(respuesta.id()).isZero();
-            assertThat(respuesta.texto()).contains("SAM QA").contains("\"protocol\":" + PROTOCOL_1_21_1);
+            assertThat(respuesta.texto()).contains(QaWire.motd()).contains("\"protocol\":" + PROTOCOL_1_21_1);
             texto = respuesta.texto();
         }
         assertThat(observador.observed()).as("el servidor presentó su identidad SAM").isPresent();
@@ -116,7 +116,7 @@ class SamClientTlsQaTest {
             conexion.enviar(handshake(1), QaWire.STATUS_REQUEST);
             var respuesta = leerFrame(conexion.entrada());
             assertThat(respuesta.id()).isZero();
-            assertThat(respuesta.texto()).contains("SAM QA");
+            assertThat(respuesta.texto()).contains(QaWire.motd());
         }
         assertThat(observador.observed()).isPresent();
     }

@@ -32,6 +32,9 @@ $env:SAM_IDENTITY_PASSPHRASE = ([System.IO.File]::ReadAllText($passFile)).Trim()
 $env:SAM_TCP_ENABLED = "true"
 $env:SAM_WS_ENABLED = "true"
 $env:SAM_WS_PATH = "/qa-ws"
+# Las pruebas hablan desde 127.0.0.1 como un cliente directo: aunque el .env confíe en el túnel local
+# (cloudflared en 127.0.0.1), aquí localhost no es proxy de confianza. 192.0.2.1 es de documentación (RFC 5737).
+$env:SAM_WS_TRUSTED_PROXIES = "192.0.2.1/32"
 # Para las pruebas que revisan archivos del servidor (no empieza con SAM_: no entra en la configuración)
 $env:QA_SAM_SERVER_DIR = $ServerDir
 

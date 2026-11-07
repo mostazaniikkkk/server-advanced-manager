@@ -24,6 +24,22 @@ final class QaWire {
     record Frame(int id, String texto) {
     }
 
+    /**
+     * La primera línea del motd que el servidor QA tiene en su server.properties: así el ping comprueba
+     * que responde ese servidor sin fijar un texto que el operador puede cambiar.
+     */
+    static String motd() throws IOException {
+        var dir = System.getenv("QA_SAM_SERVER_DIR");
+        if (dir == null || dir.isBlank()) {
+            throw new IllegalStateException("QA_SAM_SERVER_DIR (lo define qa-run.ps1)");
+        }
+        var props = new java.util.Properties();
+        try (var reader = java.nio.file.Files.newBufferedReader(java.nio.file.Path.of(dir, "server.properties"))) {
+            props.load(reader);
+        }
+        return props.getProperty("motd", "A Minecraft Server").split("\n", 2)[0];
+    }
+
     static Socket conectar() throws IOException {
         var socket = new Socket(HOST, PORT);
         socket.setSoTimeout(5000);
