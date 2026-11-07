@@ -402,9 +402,11 @@ S → C  sam:auth_result        OK | FAILED
 ### 5.4 OAuth
 
 ```
-C → S  sam:oauth_start         provider
-S → C  sam:oauth_url           url: String ≤ 2048, loopback_port: Optional<VarInt>   (fijo para Discord)
-          (el cliente abre 127.0.0.1:<puerto>, lanza el navegador y espera un solo request)
+C → S  sam:oauth_start         provider, port: VarInt
+          (antes de pedirlo, el cliente ya abrió 127.0.0.1:<port>, que espera un solo request;
+           el servidor arma redirect_uri = http://127.0.0.1:<port>/ y la usa también en el canje)
+S → C  sam:oauth_url           url: String ≤ 2048
+          (el cliente lanza el navegador del sistema con la URL)
 C → S  sam:oauth_code          code: String ≤ 1024, state: String ≤ 128
 S → C  sam:auth_result         OK | FAILED | NEED_TOTP
 ```
@@ -459,6 +461,23 @@ Límite total de descarga por conexión: 16 MiB (configurable). Los fragmentos f
 |---|---|---|
 | `sam:account_open` | S → C | Abre la GUI de cuenta (lo disparan los comandos de RF-AUTH-07; ningún comando lleva secretos) |
 | `sam:account_*` | ambos | Cambio de contraseña o correo, TOTP, vinculaciones, dispositivos, exportación y borrado. Reutilizan los formatos de 5.3; toda operación sensible exige reautenticación (`k` o TOTP) en el mismo mensaje |
+
+Primera versión de la GUI de cuenta (RF-AUTH-07d):
+
+```
+C → S  sam:account_request     (vacío; al abrir "Opciones de cuenta")
+S → C  sam:account_info        email: String ≤ 254 (enmascarado, RS-AUTH-07), email_verified: bool,
+                               google: enum { UNAVAILABLE, AVAILABLE, LINKED }
+C → S  sam:account_email       k: bytes[32], email: String ≤ 254          (RF-AUTH-07b)
+C → S  sam:oauth_start         provider, port                             (5.4; en play = vincular)
+S → C  sam:oauth_url           url
+C → S  sam:oauth_code          code, state
+C → S  sam:account_unlink      k: bytes[32], provider                     (RF-OAUTH-02)
+S → C  sam:account_result      status: enum { OK, FAILED, LOCKED }, detail: Optional<String ≤ 128>
+                               (después de cada operación llega un account_info nuevo)
+```
+
+Los fallos de contraseña en play cuentan para el mismo tope que en el login (SAM-K004).
 | `sam:lua_msg` | ambos | Canal de un script: `script_id`, `channel: String ≤ 32`, `data: bytes ≤ 4 KiB` |
 | `sam:notice` | S → C | Avisos (actualización disponible para admins, alerta del trust store) |
 
