@@ -23,6 +23,8 @@ jacoco = "0.8.16"
 nimbusJoseJwt = "10.10"
 # QR del 2FA en el cliente (MIT, sin dependencias)
 qrcodegen = "1.8.0"
+# Lua 5.2 en Java (CC: Tweaked), con interrupción: scripts de SAM (RS-LUA-01)
+cobalt = "0.9.9"
 
 [plugins]
 pitest = { id = "info.solidsoft.pitest", version.ref = "pitestGradle" }
@@ -49,3 +51,4 @@ netty-buffer = { module = "io.netty:netty-buffer", version.ref = "netty" }
 netty-handler = { module = "io.netty:netty-handler", version.ref = "netty" }
 nimbus-jose-jwt = { module = "com.nimbusds:nimbus-jose-jwt", version.ref = "nimbusJoseJwt" }
 qrcodegen = { module = "io.nayuki:qrcodegen", version.ref = "qrcodegen" }
+cobalt = { module = "cc.tweaked:cobalt", version.ref = "cobalt" }

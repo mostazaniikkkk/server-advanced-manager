@@ -6,6 +6,11 @@ plugins {
 
 repositories {
     mavenCentral()
+    // Cobalt (Lua 5.2 de CC: Tweaked, RS-LUA-01): solo ese grupo puede venir de aquí
+    maven("https://maven.squiddev.cc") {
+        name = "SquidDev"
+        content { includeGroup("cc.tweaked") }
+    }
 }
 
 dependencies {
@@ -14,6 +19,8 @@ dependencies {
     implementation(libs.bouncycastle.pkix)
     // ID token de Google (RS-OAUTH-05): lo usa el servidor; el cliente nunca carga esas clases
     implementation(libs.nimbus.jose.jwt)
+    // Runtime de Lua con sandbox (RS-LUA-01): la misma versión que usa soulsmode (Fabric deduplica el jar)
+    implementation(libs.cobalt)
     // Minecraft trae Gson y Netty 4.1.97: se compila contra ellos pero no se empaquetan
     compileOnly(libs.gson)
     testImplementation(libs.gson)
@@ -40,7 +47,8 @@ dependencies {
 tasks.withType<JavaCompile>().configureEach {
     options.encoding = "UTF-8"
     options.release = 21
-    options.compilerArgs.addAll(listOf("-Xlint:all", "-Werror"))
+    // -classfile: Cobalt trae anotaciones de Checker Framework que no hacen falta para compilar
+    options.compilerArgs.addAll(listOf("-Xlint:all", "-Xlint:-classfile", "-Werror"))
 }
 
 tasks.test {
