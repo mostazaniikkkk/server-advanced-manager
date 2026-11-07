@@ -574,14 +574,15 @@ firma   = Ed25519( clave_servidor, mensaje )
 SignedBlob {
   type        : String ≤ 32        ("keylist")
   version     : VarInt
-  issued_at   : VarLong (epoch s)
+  issued_at   : Int64 big-endian (epoch s)
   body        : bytes ≤ 64 KiB
   signature   : bytes[64]           Ed25519 con la clave de identidad del servidor sobre
-                                    "SAM-blob-v1" ‖ type ‖ 0x00 ‖ version ‖ issued_at ‖ body
+                                    UTF-8("SAM-blob-v1") ‖ UTF-8(type) ‖ 0x00 ‖ Int32 BE(version)
+                                    ‖ Int64 BE(issued_at) ‖ body
 }
 ```
 
-`keylist.body` = lista de `(key_id: bytes[8], public_key: bytes[32], label: String ≤ 64)`, donde `key_id = SHA-256(public_key)[0..8]`. Solo contiene claves **confirmadas** desde la consola (RS-SIG-03).
+`keylist.body` = `List ≤ 64` de `(key_id: bytes[8], public_key: bytes[32], label: String ≤ 64)` con el codec de 4.1, donde `key_id = SHA-256(public_key)[0..8]` (si no coincide, la lista se rechaza). Solo contiene claves **confirmadas** desde la consola (RS-SIG-03); `label` es el nombre del `.pub` sin extensión, para mostrarlo en el consentimiento.
 
 > Si el certificado del servidor usa ECDSA P-256 (respaldo de 3.1), las firmas de esta sección usan ECDSA P-256 con SHA-256.
 
