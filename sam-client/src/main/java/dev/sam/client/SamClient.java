@@ -27,6 +27,45 @@ public final class SamClient implements ClientModInitializer {
         SamClientAuth.install(LOGGER, version);
         devQuitAfterJoin();
         devQuitOnDisconnect();
+        devServerList();
+    }
+
+    /**
+     * Solo en desarrollo: {@code -Dsam.dev.serverList=dirección} abre la lista de servidores con solo
+     * esa entrada, captura la lista a los 100 ticks (con {@code sam.dev.screenshot}) y cierra el juego.
+     */
+    private static void devServerList() {
+        var address = System.getProperty("sam.dev.serverList");
+        if (!FabricLoader.getInstance().isDevelopmentEnvironment() || address == null) {
+            return;
+        }
+        var opened = new boolean[1];
+        net.fabricmc.fabric.api.client.screen.v1.ScreenEvents.AFTER_INIT.register((client, screen, width, height) -> {
+            if (screen instanceof net.minecraft.client.gui.screens.TitleScreen && !opened[0]) {
+                opened[0] = true;
+                var list = new net.minecraft.client.multiplayer.ServerList(client);
+                list.load();
+                while (list.size() > 0) {
+                    list.remove(list.get(0));
+                }
+                list.add(new net.minecraft.client.multiplayer.ServerData("SAM dev", address,
+                    net.minecraft.client.multiplayer.ServerData.Type.OTHER), false);
+                list.save();
+                client.execute(() -> client.setScreen(
+                    new net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen(screen)));
+            } else if (screen instanceof net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen) {
+                var ticks = new int[1];
+                net.fabricmc.fabric.api.client.screen.v1.ScreenEvents.afterTick(screen).register(shown -> {
+                    if (++ticks[0] != 100) {
+                        return;
+                    }
+                    var name = System.getProperty("sam.dev.screenshot", "lista");
+                    net.minecraft.client.Screenshot.grab(client.gameDirectory, name + ".png", client.getMainRenderTarget(),
+                        message -> LOGGER.info("[dev] Lista de servidores; captura: {}", message.getString()));
+                    client.execute(client::stop);
+                });
+            }
+        });
     }
 
     /**

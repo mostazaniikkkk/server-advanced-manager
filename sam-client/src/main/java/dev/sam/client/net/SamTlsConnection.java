@@ -6,4 +6,7 @@ public interface SamTlsConnection {
     void sam$setPlan(SamClientNet.Plan plan);
 
     SamClientNet.Plan sam$plan();
+
+    /** Por WebSocket: el canal está abierto, pero vanilla aún espera el túnel y el TLS de SAM. */
+    boolean sam$waiting();
 }

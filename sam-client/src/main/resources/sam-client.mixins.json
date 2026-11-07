@@ -7,7 +7,8 @@
     "ClientCommonPacketListenerAccessor",
     "ConnectScreenMixin",
     "ConnectionMixin",
-    "ServerAddressMixin"
+    "ServerAddressMixin",
+    "ServerStatusPingerMixin"
   ],
   "injectors": {
     "defaultRequire": 1

@@ -56,6 +56,16 @@ public abstract class ConnectionMixin implements SamTlsConnection {
     @Unique
     private boolean sam$resumed;
 
+    /** El canal mientras vanilla espera (aún no lo conoce). */
+    @Unique
+    private volatile Channel sam$held;
+
+    @Override
+    public boolean sam$waiting() {
+        var held = sam$held;
+        return channel == null && held != null && held.isOpen();
+    }
+
     /**
      * Por WebSocket, vanilla espera: su channelActive se retiene hasta que el túnel y el TLS de SAM están
      * listos (antes de eso vanilla no escribe nada: sus acciones quedan en cola sin canal).
@@ -67,6 +77,7 @@ public abstract class ConnectionMixin implements SamTlsConnection {
             return;
         }
         ci.cancel();
+        sam$held = ctx.channel();
         var self = (Connection) (Object) this;
         // Si se corta antes de entregarle el canal a vanilla, vanilla no se entera (su canal sigue nulo) y la
         // pantalla queda en "Conectando": se le entrega el canal ya cerrado, con el motivo
