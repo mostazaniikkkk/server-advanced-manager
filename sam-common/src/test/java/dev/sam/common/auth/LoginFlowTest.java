@@ -60,6 +60,58 @@ class LoginFlowTest {
         assertThat(flujo("Alex").hello().accountState()).isEqualTo(AccountState.NEW);
     }
 
+    // ===== Entrar con Google (REQUERIMIENTOS 5.5) =====
+
+    private LoginFlow enAuth(String nick) {
+        var flujo = flujo(nick);
+        flujo.hello();
+        flujo.onHelloAck(ACK);
+        return flujo;
+    }
+
+    @Test
+    void conSuGoogleVinculadoEntra() {
+        cuentas.register("Steve", k(1), "s@e.com");
+        cuentas.linkGoogle("steve", "sub-steve");
+        var flujo = enAuth("STEVE");
+        flujo.startOAuth();
+        var respuesta = flujo.onGoogle(Optional.of("sub-steve"));
+        assertThat(respuesta.result()).hasValueSatisfying(r -> assertThat(r.status()).isEqualTo(Status.OK));
+        assertThat(respuesta.done()).isTrue();
+        assertThat(flujo.done()).isTrue();
+    }
+
+    @Test
+    void unGoogleAjenoOSinVerificarFallaYCuentaComoIntento() {
+        cuentas.register("Steve", k(1), "s@e.com");
+        cuentas.register("Alex", k(2), "a@e.com");
+        cuentas.linkGoogle("alex", "sub-alex");
+        var flujo = enAuth("Steve");
+        var ajeno = flujo.onGoogle(Optional.of("sub-alex"));
+        assertThat(ajeno).isEqualTo(new LoginFlow.Reply(Optional.of(new AuthResult(Status.FAILED, Optional.empty(),
+            Optional.of(LoginFlow.GOOGLE_NOT_LINKED))), Optional.empty(), false));
+        assertThat(flujo.onGoogle(Optional.of("sub-nadie")).result().get().detail()).contains(LoginFlow.GOOGLE_NOT_LINKED);
+        var tercero = flujo.onGoogle(Optional.empty());
+        assertThat(tercero.result().get().detail()).contains(LoginFlow.GOOGLE_FAILED);
+        assertThat(tercero.kick()).contains(LoginFlow.KICK_TOO_MANY);
+        assertThat(flujo.done()).isFalse();
+    }
+
+    @Test
+    void oauthSoloEnLaAutenticacion() {
+        var flujo = flujo("Steve");
+        fueraDeEstado(flujo::startOAuth);
+        flujo.hello();
+        fueraDeEstado(() -> flujo.onGoogle(Optional.of("x")));
+        flujo.onHelloAck(ACK);
+        flujo.startOAuth();
+        flujo.startOAuth();
+        cuentas.register("Steve", k(1), "s@e.com");
+        flujo.onLogin(new LoginPassword(k(1), Optional.empty()));
+        fueraDeEstado(flujo::startOAuth);
+        fueraDeEstado(() -> flujo.onGoogle(Optional.of("x")));
+    }
+
     @Test
     void unJugadorNuevoSeRegistraYTermina() {
         var flujo = flujo("Steve");

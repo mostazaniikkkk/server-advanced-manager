@@ -84,6 +84,33 @@ public final class LoginFlow {
         return conclude(accounts.login(nick, login.k()));
     }
 
+    public static final String GOOGLE_FAILED = "No se pudo verificar tu cuenta de Google";
+    public static final String GOOGLE_NOT_LINKED = "Esa cuenta de Google no está vinculada a este jugador";
+
+    /** Abrir un flujo OAuth solo vale mientras se autentica. */
+    public synchronized void startOAuth() {
+        expect(State.AUTH);
+    }
+
+    /**
+     * Entra si ese Google está vinculado a esta misma cuenta (RF-OAUTH-01: no hay registro con Google).
+     * Un fallo cuenta para el tope de intentos.
+     *
+     * @param sub el {@code sub} del ID token ya validado, o vacío si Google no lo confirmó
+     */
+    public synchronized Reply onGoogle(Optional<String> sub) {
+        expect(State.AUTH);
+        if (sub.isEmpty()) {
+            return conclude(failed(GOOGLE_FAILED));
+        }
+        var mine = accounts.nickForGoogle(sub.get()).filter(linked -> Nick.normalize(linked).equals(Nick.normalize(nick)));
+        return conclude(mine.isPresent() ? new AuthResult(Status.OK, Optional.empty(), Optional.empty()) : failed(GOOGLE_NOT_LINKED));
+    }
+
+    private static AuthResult failed(String detail) {
+        return new AuthResult(Status.FAILED, Optional.empty(), Optional.of(detail));
+    }
+
     public synchronized boolean done() {
         return state == State.DONE;
     }
