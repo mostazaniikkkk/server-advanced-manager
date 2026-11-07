@@ -88,6 +88,32 @@ class SamClientTlsQaTest {
         }
     }
 
+    /**
+     * RN-04 (RF-AUTH-06c): otra conexión con el nick de un jugador conectado no lo expulsa; solo lo
+     * reemplazaría al autenticarse. Necesita un jugador real en el mundo: la corre qa-rn04.ps1 con
+     * {@code -PsamQaOnlineNick}.
+     */
+    @Test
+    @org.junit.jupiter.api.condition.EnabledIfSystemProperty(named = "sam.qa.onlineNick", matches = ".+")
+    void unaConexionConElNickDeUnJugadorConectadoNoLoExpulsa() throws Exception {
+        var nick = System.getProperty("sam.qa.onlineNick");
+        assertThat(jugadoresEnLinea()).as("precondición: %s está en el mundo", nick).contains("\"name\":\"" + nick + "\"");
+        try (var conexion = Conexion.abrir(new ServerCertificateObserver())) {
+            var desconexion = QaWire.loginHastaDesconexion(conexion.entrada(), conexion::enviar, nick);
+            assertThat(desconexion).contains("SAM-K001");
+        }
+        Thread.sleep(1000);
+        assertThat(jugadoresEnLinea()).as("RN-04: el jugador sigue conectado").contains("\"name\":\"" + nick + "\"");
+    }
+
+    /** El ping de estado: trae la muestra de jugadores en línea ({@code "sample":[{"name":...}]}). */
+    private static String jugadoresEnLinea() throws Exception {
+        try (var conexion = Conexion.abrir(new ServerCertificateObserver())) {
+            conexion.enviar(handshake(1), QaWire.STATUS_REQUEST);
+            return leerFrame(conexion.entrada()).texto();
+        }
+    }
+
     @Test
     void unClienteTlsSinAlpnSamEsCerradoSinRecibirDatos() throws Exception {
         var contexto = SSLContext.getInstance(SamTls.PROTOCOL);

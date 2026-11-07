@@ -57,6 +57,8 @@ tasks.register<Test>("qaTest") {
     useJUnitPlatform()
     systemProperty("sam.qa.port", (findProperty("samQaPort") as String?) ?: "25567")
     systemProperty("sam.qa.wsPath", (findProperty("samQaWsPath") as String?) ?: "/qa-ws")
+    // RN-04: el nick de un jugador real que está en el mundo (lo pone qa-rn04.ps1)
+    (findProperty("samQaOnlineNick") as String?)?.let { systemProperty("sam.qa.onlineNick", it) }
     outputs.upToDateWhen { false }
     testLogging {
         events("passed", "failed")

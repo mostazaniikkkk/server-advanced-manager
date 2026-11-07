@@ -5,6 +5,7 @@ build/
 
 # Fabric Loom
 run/
+run2/
 .loom-cache/
 
 # IDE

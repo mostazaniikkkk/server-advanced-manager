@@ -40,11 +40,23 @@ tasks.processResources {
 
 // ===== Prueba de punta a punta en el entorno de desarrollo (solo a pedido) =====
 // gradlew :sam-client:runClient -PsamDevServer=127.0.0.1:25567 -PsamDevPassword=... -PsamDevQuitAfterJoin=8
-tasks.named<JavaExec>("runClient") {
+// Un segundo cliente a la vez (runClient2) en su propia carpeta: los mods remapeados de run/ quedan
+// abiertos por el primero. Lo usa qa-rn04.ps1 (una sesión autenticada reemplaza a la anterior).
+loom {
+    runs {
+        register("client2") {
+            client()
+            // Obsoleto en Loom 1.19.4, pero sin reemplazo todavía (no hay Property para la carpeta)
+            runDir = "run2"
+        }
+    }
+}
+
+listOf("runClient", "runClient2").forEach { runTask -> tasks.named<JavaExec>(runTask) {
     mapOf("samDevPassword" to "sam.dev.password", "samDevEmail" to "sam.dev.email", "samDevQuitAfterJoin" to "sam.dev.quitAfterJoin",
         "samDevFillOnly" to "sam.dev.fillOnly", "samDevConfirm" to "sam.dev.confirm", "samDevCapsLock" to "sam.dev.capsLock", "samDevScreenshot" to "sam.dev.screenshot", "samDevScreenshotDelay" to "sam.dev.screenshotDelay",
         "samDevLeave" to "sam.dev.leave", "samDevServerList" to "sam.dev.serverList", "samDevRepeat" to "sam.dev.repeat")
         .forEach { (property, key) -> (findProperty(property) as String?)?.let { systemProperty(key, it) } }
     (findProperty("samDevServer") as String?)?.let { args("--quickPlayMultiplayer", it) }
     (findProperty("samDevUser") as String?)?.let { args("--username", it) }
-}
+} }
