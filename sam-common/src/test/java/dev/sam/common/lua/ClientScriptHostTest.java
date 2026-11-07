@@ -37,6 +37,8 @@ class ClientScriptHostTest {
         var tipos = "sam.log(table.concat({type(sam.on), type(sam.players), type(sam.tell), type(sam.command), type(sam.after), type(sam.hud)}, ','))";
         host.load(List.of(script("todo", tipos, "events", "players", "chat", "commands", "scheduler", "hud"), script("nada", tipos)));
         assertThat(log).containsExactly("todo: nil,nil,nil,nil,function,table", "nada: nil,nil,nil,nil,nil,nil");
+        host.load(List.of(script("lado", "sam.log(sam.side)")));
+        assertThat(log).last().isEqualTo("lado: client");
         // Y en el servidor, hud no existe
         var servidor = new ArrayList<String>();
         var enServidor = new ScriptHost(new ScriptHost.Bridge() {
@@ -58,8 +60,8 @@ class ClientScriptHostTest {
                 servidor.add(text);
             }
         }, LIMITES);
-        enServidor.load(List.of(script("srv", "sam.log(type(sam.hud) .. ',' .. type(sam.on))", "hud", "events")));
-        assertThat(servidor).containsExactly("nil,function");
+        enServidor.load(List.of(script("srv", "sam.log(type(sam.hud) .. ',' .. type(sam.on) .. ',' .. sam.side)", "hud", "events")));
+        assertThat(servidor).containsExactly("nil,function,server");
         assertThat(enServidor.hud()).isEmpty();
     }
 

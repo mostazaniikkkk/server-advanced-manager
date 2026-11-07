@@ -43,6 +43,7 @@ public final class SamClientScripts {
     public static final CustomPacketPayload.Type<SamPayload> CHUNK = SamPayload.type(ScriptChunk.ID);
     public static final CustomPacketPayload.Type<SamPayload> WANT = SamPayload.type(ScriptsWant.ID);
     public static final CustomPacketPayload.Type<SamPayload> CONSENT = SamPayload.type(ScriptsConsent.ID);
+    public static final CustomPacketPayload.Type<SamPayload> LUA_MSG = SamPayload.type(dev.sam.common.proto.scripts.LuaMessage.ID);
 
     private static Logger log;
     private static ScriptCache cache;
@@ -93,7 +94,21 @@ public final class SamClientScripts {
                 protocolError(sender, e);
             }
         }));
-        new ClientScriptRuntime(logger).install();
+        var runtime = new ClientScriptRuntime(logger, settings.resolveSibling("script-keys.properties"));
+        runtime.install();
+        // sam:lua_msg (PROTOCOLO.md 5.7): la parte de servidor de un script le habla a la de cliente
+        PayloadTypeRegistry.playS2C().register(LUA_MSG, SamPayload.codec(LUA_MSG, dev.sam.common.proto.scripts.LuaMessage.MAX_BYTES));
+        PayloadTypeRegistry.playC2S().register(LUA_MSG, SamPayload.codec(LUA_MSG, dev.sam.common.proto.scripts.LuaMessage.MAX_BYTES));
+        net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.registerGlobalReceiver(LUA_MSG,
+            (payload, context) -> context.client().execute(() -> {
+                try {
+                    runtime.receive(SamReader.decode(Unpooled.wrappedBuffer(payload.data()), dev.sam.common.proto.scripts.LuaMessage.MAX_BYTES,
+                        dev.sam.common.proto.scripts.LuaMessage::read));
+                } catch (ProtocolException e) {
+                    log.error("sam:lua_msg mal formado del servidor: {}", e.getMessage());
+                    context.responseSender().disconnect(Component.literal("Error de protocolo. [" + e.code() + "]"));
+                }
+            }));
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> forget());
         net.fabricmc.fabric.api.client.networking.v1.ClientConfigurationConnectionEvents.DISCONNECT
             .register((handler, client) -> forget());

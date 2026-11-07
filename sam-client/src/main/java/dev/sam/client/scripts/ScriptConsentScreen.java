@@ -23,7 +23,7 @@ import net.minecraft.network.chat.Component;
  * La pantalla de consentimiento de scripts (RS-LUA-05, protegida por RS-LUA-07): qué scripts quiere correr
  * el servidor en este cliente, quién los firmó y qué pueden hacer. El jugador elige cuáles acepta.
  */
-final class ScriptConsentScreen extends Screen {
+final class ScriptConsentScreen extends Screen implements dev.sam.client.ProtectedScreen {
 
     private static final int PANEL_WIDTH = 320;
     private static final int ROW = 30;

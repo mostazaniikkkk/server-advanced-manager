@@ -33,7 +33,7 @@ import net.minecraft.util.FormattedCharSequence;
  * nunca pide el correo anterior) y vincular o desvincular Google (RF-OAUTH-02). K se deriva fuera del
  * hilo de render y se borra después de enviarla.
  */
-final class AccountScreen extends Screen {
+final class AccountScreen extends Screen implements dev.sam.client.ProtectedScreen {
 
     private static final int PANEL_WIDTH = 300;
     private static final int FIELD_WIDTH = 260;

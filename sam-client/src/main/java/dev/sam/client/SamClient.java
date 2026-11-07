@@ -97,6 +97,19 @@ public final class SamClient implements ClientModInitializer {
                 // -Dsam.dev.worldScreenshot=nombre: cierra la pantalla abierta (si otro mod abrió una), espera un
                 // segundo y captura el mundo con el HUD de los scripts antes de cerrar
                 var shot = System.getProperty("sam.dev.worldScreenshot");
+                // -Dsam.dev.keepScreen=true: captura con la pantalla abierta (la de un script) y después la cierra
+                var keep = Boolean.getBoolean("sam.dev.keepScreen");
+                if (shot != null && keep) {
+                    // Cierra lo que haya (otro mod), da 2 s para que el script abra la suya y la captura
+                    client.execute(() -> client.setScreen(null));
+                    try {
+                        Thread.sleep(2000);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                    client.execute(() -> net.minecraft.client.Screenshot.grab(client.gameDirectory, shot + ".png",
+                        client.getMainRenderTarget(), message -> LOGGER.info("[dev] Captura: {}", message.getString())));
+                }
                 if (shot != null) {
                     client.execute(() -> client.setScreen(null));
                     try {
@@ -106,9 +119,10 @@ public final class SamClient implements ClientModInitializer {
                     }
                 }
                 client.execute(() -> {
+                    // Con keepScreen, la segunda captura es el mundo ya sin la pantalla (el HUD de los scripts)
                     if (shot != null) {
-                        net.minecraft.client.Screenshot.grab(client.gameDirectory, shot + ".png", client.getMainRenderTarget(),
-                            message -> LOGGER.info("[dev] Captura: {}", message.getString()));
+                        net.minecraft.client.Screenshot.grab(client.gameDirectory, shot + (keep ? "-hud" : "") + ".png",
+                            client.getMainRenderTarget(), message -> LOGGER.info("[dev] Captura: {}", message.getString()));
                     }
                     client.stop();
                 });

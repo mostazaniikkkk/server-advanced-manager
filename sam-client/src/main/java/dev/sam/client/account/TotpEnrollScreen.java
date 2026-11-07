@@ -19,7 +19,7 @@ import net.minecraft.network.chat.Component;
  * códigos de respaldo (solo se muestran aquí) y el primer código, que lo activa. El secreto solo vive en
  * esta pantalla: no se guarda en el cliente.
  */
-final class TotpEnrollScreen extends Screen {
+final class TotpEnrollScreen extends Screen implements dev.sam.client.ProtectedScreen {
 
     private static final int PANEL_WIDTH = 300;
     private static final int PANEL_HEIGHT = 210;

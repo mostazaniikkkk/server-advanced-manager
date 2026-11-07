@@ -482,6 +482,7 @@ public final class ScriptHost {
                 valueOf(loaded.receivers.put(channel(channel), fn.checkFunction()) != null)));
         }
         RegisteredFunction.bind(sam, functions.toArray(RegisteredFunction[]::new));
+        sam.rawset("side", LuaSandbox.lua(client ? "client" : "server"));
         if (client && loaded.manifest.has("screens")) {
             var screen = new LuaTable();
             RegisteredFunction.bind(screen, new RegisteredFunction[] {

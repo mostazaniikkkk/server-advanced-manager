@@ -40,7 +40,7 @@ import net.minecraft.util.FormattedCharSequence;
  * correo) o login con contraseña. La pantalla explica qué pasa, valida en vivo y solo deja enviar
  * lo que el servidor va a aceptar. K se deriva fuera del hilo de render, se envía y se borra.
  */
-public final class AuthScreen extends Screen {
+public final class AuthScreen extends Screen implements dev.sam.client.ProtectedScreen {
 
     private static final int PANEL_WIDTH = 280;
     private static final int FIELD_WIDTH = 240;

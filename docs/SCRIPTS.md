@@ -90,3 +90,16 @@ Un script con `"side": "client"` (o `"both"`) **no corre en el servidor**: se en
 Un cliente de SAM sin soporte de scripts cuenta como si los rechazara todos. El jugador puede rechazarlos siempre con `enabled=false` en `config/sam-client/scripts.properties`.
 
 Topes por conexión: 128 scripts y 16 MiB en total (4 MiB por script). El cliente guarda cada script en `sam-client/script-cache/` por su hash y lo vuelve a verificar cada vez que lo usa: si cambias el script, se descarga de nuevo.
+
+### Qué puede hacer un script de cliente
+
+La lista completa está en `docs/PROTOCOLO.md` (8.3, "API de cliente v0"). En resumen, según las capacidades del manifest:
+
+- `hud`: textos e imágenes PNG del propio script en la pantalla del jugador.
+- `screens`: ventanas propias (botones, campos de texto, casillas, imágenes). Siempre llevan la marca **"Interfaz del servidor"** y nunca se abren encima de otra pantalla.
+- `keybinds`: teclas (a-z, 0-9, f1-f12). Si la tecla ya la usa el juego u otro mod, no se asigna; el jugador puede cambiarla en `config/sam-client/script-keys.properties`.
+- `messages`: un script `"side": "both"` habla con su propia parte de servidor (`sam.send` / `sam.receive`). Con `sam.side` cada lado sabe dónde corre.
+
+Las imágenes van dentro de la carpeta del script (por ejemplo `assets/icono.png`), así quedan firmadas: solo PNG, hasta 64 KiB y 256×256.
+
+Mientras el jugador tiene abierta una pantalla de SAM (inicio de sesión, cuenta, 2FA, consentimiento), los scripts de cliente no reciben nada.

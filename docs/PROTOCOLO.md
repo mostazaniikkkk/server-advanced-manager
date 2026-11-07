@@ -692,11 +692,11 @@ Lectura estricta como `signature.json`: como mucho 4 KiB, claves desconocidas, d
 
 Reglas de `commands`: nombre `[a-z][a-z0-9_]{0,31}`; `permission` por defecto 0 (cualquier jugador), 2 a 4 para operadores; como mucho 16 por script. No se puede usar un nombre que ya tiene el servidor (vanilla, otros mods, `sam`) ni el de otro script: el registro falla con su motivo. Los comandos se registran al cargar los scripts (inicio y `/reload`); con `/sam scripts reload` un comando que ya no existe responde que no está disponible hasta el próximo `/reload`.
 
-**API de cliente v0 (borrador, RF-LUA-06).** Corre en el juego del jugador, con la misma sandbox (RS-LUA-01). Las capacidades de servidor (`events`, `players`, `chat`, `commands`) **no existen** en el cliente y las de cliente no existen en el servidor, aunque el manifest las declare.
+**API de cliente v0 (borrador, RF-LUA-06).** Corre en el juego del jugador, con la misma sandbox (RS-LUA-01) y los mismos topes por llamada que el servidor por defecto (50 ms, 32 MB). Lua corre en el tick del cliente, nunca en el render. Las capacidades de servidor (`events`, `players`, `chat`, `commands`) **no existen** en el cliente y las de cliente no existen en el servidor, aunque el manifest las declare.
 
 | Capacidad | Funciones |
 |---|---|
-| (siempre) | `sam.log(texto)`: al log del juego, con el id del script |
+| (siempre) | `sam.log(texto)`: al log del juego, con el id del script; `sam.side` es `"client"` (y `"server"` en el servidor). Un script `"both"` corre los mismos archivos en los dos lados: con `sam.side` elige qué hace en cada uno |
 | `scheduler` | `sam.after`, `sam.every` y `sam.cancel`, en ticks del cliente (20 por segundo) |
 | `hud` | `sam.hud.text(id, texto[, {anchor, x, y, color}])` crea o reemplaza un texto en pantalla; `sam.hud.remove(id)` lo quita (devuelve si existía); `sam.hud.clear()` quita todos (devuelve cuántos) |
 
