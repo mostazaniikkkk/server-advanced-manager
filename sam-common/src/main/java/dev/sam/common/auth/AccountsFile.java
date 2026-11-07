@@ -47,6 +47,9 @@ public final class AccountsFile {
                 if (account.googleSub().isPresent()) {
                     writer.name("google").value(account.googleSub().get());
                 }
+                if (account.totp().isPresent()) {
+                    writer.name("totp").value(account.totp().get());
+                }
                 writer.endObject();
             }
             writer.endArray();
@@ -149,7 +152,7 @@ public final class AccountsFile {
         reader.beginObject();
         while (reader.hasNext()) {
             var name = reader.nextName();
-            if (!List.of("nick", "hash", "email", "google").contains(name) || fields.containsKey(name)) {
+            if (!List.of("nick", "hash", "email", "google", "totp").contains(name) || fields.containsKey(name)) {
                 throw invalid("campo inválido " + name);
             }
             if (reader.peek() != JsonToken.STRING) {
@@ -162,7 +165,8 @@ public final class AccountsFile {
         var hash = fields.get("hash");
         var email = fields.get("email");
         var google = Optional.ofNullable(fields.get("google"));
-        if (fields.size() != 3 + (google.isPresent() ? 1 : 0) || !Nick.isValid(nick) || !AccountService.isValidEmail(email)) {
+        var totp = Optional.ofNullable(fields.get("totp"));
+        if (fields.size() != 3 + (google.isPresent() ? 1 : 0) + (totp.isPresent() ? 1 : 0) || !Nick.isValid(nick) || !AccountService.isValidEmail(email)) {
             throw invalid("cuenta incompleta o con nick o correo inválido");
         }
         try {
@@ -173,7 +177,10 @@ public final class AccountsFile {
         if (google.filter(String::isEmpty).isPresent()) {
             throw invalid("google vacío en la cuenta " + nick);
         }
-        return new Account(Nick.normalize(nick), nick, hash, email, google);
+        if (totp.filter(String::isEmpty).isPresent()) {
+            throw invalid("totp vacío en la cuenta " + nick);
+        }
+        return new Account(Nick.normalize(nick), nick, hash, email, google, totp);
     }
 
     private static IllegalArgumentException invalid(String detail) {

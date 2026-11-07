@@ -57,9 +57,9 @@ class AccountManagementTest {
     @Test
     void laInfoMuestraElCorreoEnmascaradoYElEstadoDeGoogle() {
         var cuentas = servicio();
-        assertThat(cuentas.info("STEVE", true)).isEqualTo(new AccountInfo("s***@e***.com", false, AccountInfo.Google.AVAILABLE));
-        assertThat(cuentas.info("Steve", false)).isEqualTo(new AccountInfo("s***@e***.com", false, AccountInfo.Google.UNAVAILABLE));
-        assertThat(cuentas.info("alex", true)).isEqualTo(new AccountInfo("a***@e***.com", false, AccountInfo.Google.LINKED));
+        assertThat(cuentas.info("STEVE", true)).isEqualTo(new AccountInfo("s***@e***.com", false, AccountInfo.Google.AVAILABLE, AccountInfo.Totp.UNAVAILABLE));
+        assertThat(cuentas.info("Steve", false)).isEqualTo(new AccountInfo("s***@e***.com", false, AccountInfo.Google.UNAVAILABLE, AccountInfo.Totp.UNAVAILABLE));
+        assertThat(cuentas.info("alex", true)).isEqualTo(new AccountInfo("a***@e***.com", false, AccountInfo.Google.LINKED, AccountInfo.Totp.UNAVAILABLE));
         // Si el admin deshabilita Google, una cuenta vinculada se ve como no disponible
         assertThat(cuentas.info("alex", false).google()).isEqualTo(AccountInfo.Google.UNAVAILABLE);
     }
@@ -67,7 +67,7 @@ class AccountManagementTest {
     @Test
     void elCorreoSeCambiaConLaContrasenaYSeGuarda() {
         var cuentas = servicio();
-        assertThat(cuentas.changeEmail("Steve", k(1), "nuevo@correo.cl")).isEqualTo(OK);
+        assertThat(cuentas.changeEmail("Steve", k(1), Optional.empty(), "nuevo@correo.cl")).isEqualTo(OK);
         assertThat(guardada("steve").email()).isEqualTo("nuevo@correo.cl");
         assertThat(cuentas.info("steve", true).email()).isEqualTo("n***@c***.cl");
         // La contraseña sigue siendo la misma
@@ -77,9 +77,9 @@ class AccountManagementTest {
     @Test
     void sinLaContrasenaCorrectaOConCorreoInvalidoNoCambia() {
         var cuentas = servicio();
-        assertThat(cuentas.changeEmail("steve", k(9), "nuevo@correo.cl")).isEqualTo(fallo(AccountService.WRONG_PASSWORD));
-        assertThat(cuentas.changeEmail("nadie", k(1), "nuevo@correo.cl")).isEqualTo(fallo(AccountService.WRONG_PASSWORD));
-        assertThat(cuentas.changeEmail("steve", k(1), "sin-arroba")).isEqualTo(fallo(AccountService.INVALID_EMAIL));
+        assertThat(cuentas.changeEmail("steve", k(9), Optional.empty(), "nuevo@correo.cl")).isEqualTo(fallo(AccountService.WRONG_PASSWORD));
+        assertThat(cuentas.changeEmail("nadie", k(1), Optional.empty(), "nuevo@correo.cl")).isEqualTo(fallo(AccountService.WRONG_PASSWORD));
+        assertThat(cuentas.changeEmail("steve", k(1), Optional.empty(), "sin-arroba")).isEqualTo(fallo(AccountService.INVALID_EMAIL));
         assertThat(cambios).isEmpty();
         assertThat(cuentas.info("steve", true).email()).isEqualTo("s***@e***.com");
     }
@@ -107,11 +107,11 @@ class AccountManagementTest {
     @Test
     void desvincularPideLaContrasena() {
         var cuentas = servicio();
-        assertThat(cuentas.unlink("alex", k(9), OAuthProvider.GOOGLE)).isEqualTo(fallo(AccountService.WRONG_PASSWORD));
-        assertThat(cuentas.unlink("steve", k(1), OAuthProvider.GOOGLE)).isEqualTo(fallo(AccountService.NOT_LINKED));
-        assertThat(cuentas.unlink("alex", k(2), OAuthProvider.DISCORD)).isEqualTo(fallo(AccountService.NOT_LINKED));
+        assertThat(cuentas.unlink("alex", k(9), Optional.empty(), OAuthProvider.GOOGLE)).isEqualTo(fallo(AccountService.WRONG_PASSWORD));
+        assertThat(cuentas.unlink("steve", k(1), Optional.empty(), OAuthProvider.GOOGLE)).isEqualTo(fallo(AccountService.NOT_LINKED));
+        assertThat(cuentas.unlink("alex", k(2), Optional.empty(), OAuthProvider.DISCORD)).isEqualTo(fallo(AccountService.NOT_LINKED));
         assertThat(cambios).isEmpty();
-        assertThat(cuentas.unlink("alex", k(2), OAuthProvider.GOOGLE)).isEqualTo(OK);
+        assertThat(cuentas.unlink("alex", k(2), Optional.empty(), OAuthProvider.GOOGLE)).isEqualTo(OK);
         assertThat(guardada("alex").googleSub()).isEmpty();
         assertThat(cuentas.nickForGoogle("sub-de-alex")).isEmpty();
         // Libre otra vez: se puede vincular a otra cuenta

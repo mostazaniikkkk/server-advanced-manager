@@ -47,13 +47,14 @@ class AccountMessagesTest {
 
     @Test
     void laInfoDeCuentaVaYVuelve() {
-        for (var info : List.of(new AccountInfo("s***@e***.com", true, AccountInfo.Google.LINKED),
-                new AccountInfo("", false, AccountInfo.Google.UNAVAILABLE),
-                new AccountInfo("a".repeat(254), false, AccountInfo.Google.AVAILABLE))) {
+        for (var info : List.of(new AccountInfo("s***@e***.com", true, AccountInfo.Google.LINKED, AccountInfo.Totp.ON),
+                new AccountInfo("", false, AccountInfo.Google.UNAVAILABLE, AccountInfo.Totp.UNAVAILABLE),
+                new AccountInfo("a".repeat(254), false, AccountInfo.Google.AVAILABLE, AccountInfo.Totp.OFF))) {
             assertThat(leer(escribir(info::write), 512, AccountInfo::read)).isEqualTo(info);
         }
         malFormado(w -> w.string("a".repeat(255), 255), AccountInfo::read, "largo 255 fuera de 0..254");
         malFormado(w -> w.string("x", 254).bool(true).varInt(3), AccountInfo::read, "valor 3 fuera de rango para Google");
+        malFormado(w -> w.string("x", 254).bool(true).varInt(0).varInt(3), AccountInfo::read, "valor 3 fuera de rango para Totp");
     }
 
     @Test
