@@ -71,7 +71,7 @@ public final class AuthScreen extends Screen {
     private EditBox email;
     private Button submit;
     private Button toggle;
-    private Button google;
+    private GoogleButton google;
     private boolean visible;
     private boolean busy;
     private Component status = Component.empty();
@@ -126,8 +126,8 @@ public final class AuthScreen extends Screen {
         addRenderableWidget(Button.builder(Component.literal("Salir"), b -> leave())
             .bounds(x + FIELD_WIDTH * 2 / 3 + 2, buttonsY, FIELD_WIDTH / 3 - 2, 20).build());
         if (googleOffered()) {
-            google = addRenderableWidget(Button.builder(Component.literal("Entrar con Google"), b -> signInWithGoogle())
-                .bounds(x, buttonsY + 24, FIELD_WIDTH, 20).build());
+            google = addRenderableWidget(new GoogleButton(x, buttonsY + 24, FIELD_WIDTH, 20, Component.literal("Entrar con Google"),
+                this::signInWithGoogle));
         }
         setInitialFocus(password);
         var window = minecraft.getWindow().getWindow();
