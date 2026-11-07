@@ -37,7 +37,8 @@ public record LoginPassword(byte[] k, Optional<String> totp) {
         return ProtocolException.fromRead(() -> new LoginPassword(k, totp));
     }
 
-    static void checkK(byte[] k) {
+    /** @throws IllegalArgumentException si {@code k} no tiene 32 bytes */
+    public static void checkK(byte[] k) {
         if (k.length != PasswordDerivation.KEY_LENGTH) {
             throw new IllegalArgumentException("k debe tener 32 bytes");
         }
