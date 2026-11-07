@@ -4,6 +4,7 @@
   "package": "dev.sam.server.mixin",
   "compatibilityLevel": "JAVA_21",
   "server": [
+    "CommandSourceStackAccessor",
     "ServerChannelInitializerMixin",
     "ServerConfigurationPacketListenerMixin",
     "ServerLoginPacketListenerMixin",

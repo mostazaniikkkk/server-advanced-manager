@@ -99,6 +99,8 @@ public final class SamServer implements DedicatedServerModInitializer {
             LOGGER.error("Configuración inválida: {}. El login de SAM queda cerrado.", e.getMessage());
             return;
         }
+        // Scripts Lua (RF-LUA-01..03): independientes del login; sin firma de confianza no corre nada
+        dev.sam.server.scripts.SamScripts.install(LOGGER, FabricLoader.getInstance().getConfigDir().resolve("sam/keys"), config);
         // Los límites aplican aunque el login de SAM quede cerrado: el vanilla también pasa por la compuerta
         ingress = new Ingress(ingress.policy(), ingress.routes(), transport.guard());
         loadIdentity(transport, config);

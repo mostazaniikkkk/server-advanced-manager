@@ -8,6 +8,14 @@ base {
     archivesName = "sam-server"
 }
 
+repositories {
+    // Cobalt (RS-LUA-01): solo ese grupo puede venir de aquí
+    maven("https://maven.squiddev.cc") {
+        name = "SquidDev"
+        content { includeGroup("cc.tweaked") }
+    }
+}
+
 dependencies {
     minecraft(libs.minecraft)
     mappings(loom.officialMojangMappings())
@@ -22,6 +30,9 @@ dependencies {
     implementation(libs.bouncycastle.pkix)
     include(libs.bouncycastle.pkix)
     include(libs.bouncycastle.util)
+    // Lua de los scripts (RS-LUA-01); la misma versión que soulsmode: Fabric deduplica el jar
+    implementation(libs.cobalt)
+    include(libs.cobalt)
     // ID token de Google (RS-OAUTH-05)
     implementation(libs.nimbus.jose.jwt)
     include(libs.nimbus.jose.jwt)

@@ -6,6 +6,14 @@ base {
     archivesName = "sam-client"
 }
 
+repositories {
+    // Cobalt (RS-LUA-01), que trae sam-common: solo ese grupo puede venir de aquí
+    maven("https://maven.squiddev.cc") {
+        name = "SquidDev"
+        content { includeGroup("cc.tweaked") }
+    }
+}
+
 dependencies {
     minecraft(libs.minecraft)
     mappings(loom.officialMojangMappings())

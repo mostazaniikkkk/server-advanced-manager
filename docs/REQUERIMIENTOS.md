@@ -412,8 +412,8 @@ SAM_SCRIPTS_TRUSTED_KEYS=config/sam/keys/trusted/   # claves públicas (se confi
 SAM_SCRIPTS_DEV_MODE=false                          # permite scripts sin firmar SOLO del lado servidor
 SAM_SCRIPTS_CLIENT_ON_REJECT=per_script             # kick | allow | per_script
 SAM_SCRIPTS_CONSOLE_COMMANDS=give,effect,title      # lista blanca para "ejecutar como consola"
-SAM_SCRIPTS_MAX_INSTRUCTIONS=1000000
-SAM_SCRIPTS_MAX_MEMORY=32MB
+SAM_SCRIPTS_MAX_CALL_MS=50                          # tope de tiempo por llamada a un script (se interrumpe y se suspende)
+SAM_SCRIPTS_MAX_MEMORY=32MB                         # memoria aproximada que puede asignar en una llamada
 
 # ===== Actualizaciones =====
 SAM_UPDATE_CHECK=true                       # consulta GitHub Releases
