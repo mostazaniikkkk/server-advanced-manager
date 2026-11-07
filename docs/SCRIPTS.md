@@ -97,9 +97,14 @@ La lista completa está en `docs/PROTOCOLO.md` (8.3, "API de cliente v0"). En re
 
 - `hud`: textos e imágenes PNG del propio script en la pantalla del jugador.
 - `screens`: ventanas propias (botones, campos de texto, casillas, imágenes). Siempre llevan la marca **"Interfaz del servidor"** y nunca se abren encima de otra pantalla.
-- `keybinds`: teclas (a-z, 0-9, f1-f12). Si la tecla ya la usa el juego u otro mod, no se asigna; el jugador puede cambiarla en `config/sam-client/script-keys.properties`.
+- `keybinds`: teclas (a-z, 0-9, f1-f12). Si la tecla ya la usa el juego u otro mod, no se asigna; el jugador puede cambiarla desde el menú de pausa → "Teclas de scripts".
+- `game`: leer datos de la partida del jugador (vida, posición, dimensión, barra rápida, jugadores en tab, tamaño de la GUI). Es una lista cerrada: nada sobre sus mods, archivos ni su PC.
 - `messages`: un script `"side": "both"` habla con su propia parte de servidor (`sam.send` / `sam.receive`). Con `sam.side` cada lado sabe dónde corre.
 
 Las imágenes van dentro de la carpeta del script (por ejemplo `assets/icono.png`), así quedan firmadas: solo PNG, hasta 64 KiB y 256×256.
 
 Mientras el jugador tiene abierta una pantalla de SAM (inicio de sesión, cuenta, 2FA, consentimiento), los scripts de cliente no reciben nada.
+
+### Guardar datos (servidor)
+
+Con la capacidad `storage`, un script de servidor guarda datos que sobreviven a reinicios: `sam.store.set("puntos:steve", 10)`, `sam.store.get("puntos:steve")`, `sam.store.keys()`. Hasta 1024 claves y 256 KiB por script. SAM los guarda en `<mundo>/sam/scripts/<id>.dat`; hazle copia de seguridad junto con el mundo.

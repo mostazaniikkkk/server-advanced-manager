@@ -126,7 +126,7 @@ class ClientUiTest {
               .. tostring(sam.screen.close()) .. "," .. tostring(sam.key("k", "k", function() end)))
             """, "screens", "keybinds")));
         assertThat(log).containsExactly("false,false,false");
-        assertThat(minimo.keyPressed("m", "k")).isFalse();
+        assertThat(minimo.keyPressed("m", "k")).as("la función queda aunque no haya tecla").isTrue();
     }
 
     @Test
@@ -259,10 +259,12 @@ class ClientUiTest {
         assertThat(juego.teclas).containsExactly("k.menu=m", "k.avanzar=w", "k.f=f12", "k.d=0");
         assertThat(juego.log).containsExactly("true", "false");
         assertThat(host.keyPressed("k", "menu")).isTrue();
-        assertThat(host.keyPressed("k", "avanzar")).isFalse();
+        // Sin tecla asignada la función queda: si el jugador le elige otra, funciona
+        assertThat(host.keyPressed("k", "avanzar")).isTrue();
+        assertThat(juego.log).last().isEqualTo("nunca");
         assertThat(host.keyPressed("k", "nada")).isFalse();
         assertThat(host.keyPressed("otro", "menu")).isFalse();
-        assertThat(juego.log).last().isEqualTo("menú");
+        assertThat(juego.log).contains("menú");
         var casos = Map.of(
             "sam.key('M', 'm', function() end)", "id de tecla inválido \"M\"",
             "sam.key('a', 'ctrl', function() end)", "tecla desconocida \"ctrl\" (a-z, 0-9 o f1-f12)",

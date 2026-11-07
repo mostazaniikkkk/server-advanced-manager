@@ -41,6 +41,7 @@ public final class ScriptHost {
     static final int MAX_HUD = 64;
     static final int MAX_SENT = 32;
     private static final int MAX_IMAGE = 512;
+    private static final int MAX_TAB = 200;
     private static final int MAX_KEYS = 8;
     private static final int MAX_TITLE = 64;
     private static final int MAX_SHORT = 64;
@@ -98,6 +99,11 @@ public final class ScriptHost {
         default boolean send(String script, String player, String channel, byte[] data) {
             return false;
         }
+
+        /** Los datos guardados de ese script ({@code storage}); vacío si no hay dónde guardarlos. */
+        default Optional<ScriptStore> store(String script) {
+            return Optional.empty();
+        }
     }
 
     /**
@@ -152,6 +158,23 @@ public final class ScriptHost {
         default boolean bindKey(String script, String id, String key) {
             return false;
         }
+
+        /** Los datos de la partida de la lista cerrada (RS-LUA-10); vacío fuera del mundo. */
+        default Optional<GameState> game() {
+            return Optional.empty();
+        }
+    }
+
+    /** Un espacio de la barra rápida. */
+    public record Item(String id, int count) {
+    }
+
+    /**
+     * Lo único que un script del cliente puede leer de la partida (RS-LUA-10, RN-28, PROTOCOLO.md 8.3). Agregar
+     * un campo es un cambio de la especificación con revisión de seguridad (RN-24).
+     */
+    public record GameState(String name, double health, double maxHealth, int food, double x, double y, double z, String dimension,
+            List<Item> hotbar, int selected, List<String> players, int guiScale, int width, int height) {
     }
 
     /** Una imagen del HUD de un script: los bytes ya pasaron {@link PngInfo#check}. */
@@ -213,7 +236,7 @@ public final class ScriptHost {
         return true;
     }
 
-    /** El jugador apretó una tecla asignada a un script. @return si el script la esperaba */
+    /** El jugador apretó la tecla de {@code sam.key(id, ...)} (la que tenga asignada). @return si el script la registró */
     public synchronized boolean keyPressed(String script, String id) {
         var loaded = scripts.get(script);
         var handler = loaded == null || loaded.state != State.RUNNING ? null : loaded.keys.get(id);
@@ -483,6 +506,19 @@ public final class ScriptHost {
         }
         RegisteredFunction.bind(sam, functions.toArray(RegisteredFunction[]::new));
         sam.rawset("side", LuaSandbox.lua(client ? "client" : "server"));
+        if (loaded.manifest.has("storage")) {
+            // En el cliente no hay dónde guardar: su puente nunca da un almacén
+            var store = bridge.store(loaded.id());
+            if (store.isPresent()) {
+                sam.rawset("store", storeTable(store.get()));
+            }
+        }
+        if (client && loaded.manifest.has("game")) {
+            var game = new LuaTable();
+            RegisteredFunction.bind(game, new RegisteredFunction[] {
+                RegisteredFunction.of("state", s -> ui.game().<LuaValue>map(ScriptHost::gameTable).orElse(Constants.NIL))});
+            sam.rawset("game", game);
+        }
         if (client && loaded.manifest.has("screens")) {
             var screen = new LuaTable();
             RegisteredFunction.bind(screen, new RegisteredFunction[] {
@@ -659,6 +695,71 @@ public final class ScriptHost {
         return side;
     }
 
+    // ===== storage (servidor) y game (cliente) =====
+
+    private static LuaTable storeTable(ScriptStore store) {
+        var table = new LuaTable();
+        RegisteredFunction.bind(table, new RegisteredFunction[] {
+            RegisteredFunction.of("get", (s, key) -> {
+                var value = store.get(string(key));
+                return value.isPresent() ? LuaData.decode(value.get()) : Constants.NIL;
+            }),
+            RegisteredFunction.of("set", (s, key, value) -> {
+                var name = string(key);
+                var data = value.isNil() ? Optional.<byte[]>empty() : Optional.of(LuaData.encode(value));
+                var existed = store.get(name).isPresent();
+                try {
+                    store.set(name, data);
+                } catch (IllegalArgumentException e) {
+                    throw new LuaError(e.getMessage());
+                }
+                return valueOf(existed);
+            }),
+            RegisteredFunction.of("keys", s -> {
+                var list = new LuaTable();
+                var keys = store.keys();
+                for (var i = 0; i < keys.size(); i++) {
+                    list.rawset(i + 1, LuaSandbox.lua(keys.get(i)));
+                }
+                return list;
+            })});
+        return table;
+    }
+
+    /** Una copia nueva de los datos de la partida para Lua (RS-LUA-02c). */
+    private static LuaTable gameTable(GameState state) {
+        var table = new LuaTable();
+        table.rawset("name", LuaSandbox.lua(state.name()));
+        table.rawset("health", valueOf(state.health()));
+        table.rawset("max_health", valueOf(state.maxHealth()));
+        table.rawset("food", valueOf(state.food()));
+        table.rawset("x", valueOf(state.x()));
+        table.rawset("y", valueOf(state.y()));
+        table.rawset("z", valueOf(state.z()));
+        table.rawset("dimension", LuaSandbox.lua(state.dimension()));
+        var hotbar = new LuaTable();
+        for (var i = 0; i < state.hotbar().size(); i++) {
+            var slot = new LuaTable();
+            slot.rawset("id", LuaSandbox.lua(state.hotbar().get(i).id()));
+            slot.rawset("count", valueOf(state.hotbar().get(i).count()));
+            hotbar.rawset(i + 1, slot);
+        }
+        table.rawset("hotbar", hotbar);
+        table.rawset("selected", valueOf(state.selected()));
+        var players = new LuaTable();
+        var names = state.players().stream().limit(MAX_TAB).toList();
+        for (var i = 0; i < names.size(); i++) {
+            players.rawset(i + 1, LuaSandbox.lua(names.get(i)));
+        }
+        table.rawset("players", players);
+        var gui = new LuaTable();
+        gui.rawset("scale", valueOf(state.guiScale()));
+        gui.rawset("width", valueOf(state.width()));
+        gui.rawset("height", valueOf(state.height()));
+        table.rawset("gui", gui);
+        return table;
+    }
+
     // ===== Pantallas (screens) y teclas (keybinds) =====
 
     private void closeScreen(Loaded loaded) {
@@ -685,11 +786,9 @@ public final class ScriptHost {
             throw new LuaError("como mucho " + MAX_KEYS + " teclas por script");
         }
         loaded.keyIds.add(id);
-        var bound = ui.bindKey(loaded.id(), id, key);
-        if (bound) {
-            loaded.keys.put(id, fn);
-        }
-        return valueOf(bound);
+        // La función queda aunque la tecla no se asigne: el jugador puede elegirle otra después
+        loaded.keys.put(id, fn);
+        return valueOf(ui.bindKey(loaded.id(), id, key));
     }
 
     /** La pantalla declarativa de {@code sam.screen.open(def)} (PROTOCOLO.md 8.3), validada entera. */

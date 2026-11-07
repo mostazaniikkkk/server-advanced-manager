@@ -688,7 +688,10 @@ Lectura estricta como `signature.json`: como mucho 4 KiB, claves desconocidas, d
 | `scheduler` | `sam.after(ticks, fn)` y `sam.every(ticks, fn)`; devuelven un id para `sam.cancel(id)` |
 | `players` | `sam.players()`: lista de `{name, uuid}` de los jugadores en línea |
 | `chat` | `sam.tell(nombre, texto)` y `sam.broadcast(texto)` (texto plano, ≤ 256 caracteres) |
+| `storage` | `sam.store.get(clave)`, `sam.store.set(clave, valor)` (`nil` borra; devuelve si la clave ya existía) y `sam.store.keys()` (lista ordenada): datos del script que sobreviven a reinicios y a `/reload` (RS-LUA-02b) |
 | `commands` | `sam.command(nombre, fn[, {permission = 0..4}])` registra `/nombre` (RF-LUA-03). Al ejecutarse: `fn(jugador, texto, args)` con el jugador como `{name, uuid}` (o `nil` si es la consola), el texto después del nombre y una lista con sus palabras. Si `fn` devuelve un valor, es la respuesta para quien lo ejecutó |
+
+Reglas de `storage`: `clave` `[a-z0-9_.:-]{1,64}`; `valor` un `LuaData` (8.5) de hasta 4000 bytes; como mucho 1024 claves y 256 KiB por script (claves más valores). Pasarse es un error del script y no se guarda nada de esa llamada. SAM lo guarda en `<mundo>/sam/scripts/<id>.dat` (no es un archivo que el script pueda tocar), a lo sumo 5 s después del cambio y al apagar el servidor. Un archivo dañado se aparta como `<id>.dat.bad` y el script empieza vacío, con un error en el log. Solo existe en el servidor.
 
 Reglas de `commands`: nombre `[a-z][a-z0-9_]{0,31}`; `permission` por defecto 0 (cualquier jugador), 2 a 4 para operadores; como mucho 16 por script. No se puede usar un nombre que ya tiene el servidor (vanilla, otros mods, `sam`) ni el de otro script: el registro falla con su motivo. Los comandos se registran al cargar los scripts (inicio y `/reload`); con `/sam scripts reload` un comando que ya no existe responde que no está disponible hasta el próximo `/reload`.
 
@@ -702,7 +705,8 @@ Reglas de `commands`: nombre `[a-z][a-z0-9_]{0,31}`; `permission` por defecto 0 
 
 | `messages` | `sam.send(canal, datos)` a la parte de servidor del mismo script; `sam.receive(canal, fn)` con `fn(datos)` (devuelve si reemplazó a otro) |
 | `screens` | `sam.screen.open(def)` (devuelve si se abrió), `sam.screen.close()` (devuelve si su pantalla estaba abierta) y `sam.screen.on(fn)` con los eventos de su propia pantalla (devuelve si reemplazó a otro) |
-| `keybinds` | `sam.key(id, tecla, fn)`: `fn()` al apretar la tecla en el mundo; devuelve si quedó asignada |
+| `keybinds` | `sam.key(id, tecla, fn)`: `fn()` al apretar la tecla en el mundo; devuelve si quedó asignada (si no, `fn` igual queda: funciona cuando el jugador le elige otra tecla) |
+| `game` | `sam.game.state()`: una copia de los datos de la partida de la lista cerrada de abajo (RS-LUA-10, RN-28) |
 
 Reglas de `hud`: `id` `[a-z0-9_]{1,32}`; texto plano ≤ 256 caracteres (sin códigos §); `anchor` uno de `top_left` (por defecto), `top`, `top_right`, `left`, `center`, `right`, `bottom_left`, `bottom`, `bottom_right`; `x` e `y` desplazamientos en píxeles de la GUI desde el ancla (−4096..4096, por defecto 0); `color` `0xRRGGBB` (por defecto blanco); como mucho 64 textos por script. El render **no** ejecuta Lua: dibuja cada frame lo último que los scripts dejaron. Si un script se suspende o falla, sus textos desaparecen. Un script con `hud` nunca dibuja sobre las pantallas de SAM (RS-LUA-07): el HUD solo se dibuja en el mundo, sin pantallas abiertas.
 
@@ -724,7 +728,9 @@ En el servidor, `messages` agrega `sam.send(jugador, canal, datos)` (devuelve `f
 
 **Pantallas protegidas (RS-LUA-07/08).** Mientras hay una pantalla de SAM abierta (inicio de sesión, consentimiento de scripts, cuenta, 2FA), los scripts del cliente no reciben nada: ni ticks, ni teclas, ni mensajes, ni eventos de pantalla, y el HUD no se dibuja. Los mensajes que llegan en ese tiempo esperan (hasta 64) y se entregan al cerrarla.
 
-**Teclas (`keybinds`, RF-LUA-06e).** `tecla` es `a`..`z`, `0`..`9` o `f1`..`f12`; como mucho 8 por script. Solo se escuchan en el mundo sin pantalla abierta. Si la tecla ya la usa una acción del juego o de otro mod, no se asigna. El jugador puede cambiarla o desactivarla (`none`) en `config/sam-client/script-keys.properties`, con una línea `<servidor>.<script>.<id>=<tecla>` que SAM agrega la primera vez.
+**Datos de la partida (`game`, RS-LUA-10, RN-28).** `sam.game.state()` devuelve una tabla nueva en cada llamada, con **solo** esto: `name` (el nick), `health`, `max_health`, `food` (0..20), `x`, `y`, `z` (posición), `dimension` (por ejemplo `minecraft:overworld`), `hotbar` (9 entradas `{id, count}`, con `id = "minecraft:air"` y `count = 0` si está vacía), `selected` (1..9), `players` (los nicks de la lista de tab, hasta 200) y `gui = {scale, width, height}` (escala de la GUI y tamaño en píxeles de la GUI, para el layout). Fuera del mundo devuelve `nil`. Nada sobre mods, archivos, opciones, resource packs ni hardware: agregar un dato a la lista es un cambio de esta especificación con revisión de seguridad (RN-24).
+
+**Teclas (`keybinds`, RF-LUA-06e).** `tecla` es `a`..`z`, `0`..`9` o `f1`..`f12`; como mucho 8 por script. Solo se escuchan en el mundo sin pantalla abierta. Si la tecla ya la usa una acción del juego o de otro mod, no se asigna. El jugador puede cambiarla o desactivarla desde el menú de pausa → **"Teclas de scripts"** (una pantalla de SAM, protegida: ningún script la ve ni la abre), que lista las teclas de los scripts de este servidor; o a mano en `config/sam-client/script-keys.properties`, con una línea `<servidor>.<script>.<id>=<tecla>` (`none` la desactiva) que SAM agrega la primera vez. En la pantalla, un clic en la tecla y después la nueva; `Supr` o `Retroceso` la desactiva y `Esc` cancela. Una tecla que ya usa el juego, otro mod u otro script se rechaza con el motivo. El cambio vale en el acto.
 
 **Imágenes (RF-LUA-08, RN-29).** Solo archivos `.png` del script, de hasta 64 KiB y 256×256 píxeles. Antes de decodificarlos se revisan la firma PNG y la cabecera `IHDR`; se decodifican con `NativeImage` de vanilla y se suben a la GPU una vez por conexión; se liberan al salir.
 
