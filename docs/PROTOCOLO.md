@@ -688,6 +688,7 @@ Lectura estricta como `signature.json`: como mucho 4 KiB, claves desconocidas, d
 | `scheduler` | `sam.after(ticks, fn)` y `sam.every(ticks, fn)`; devuelven un id para `sam.cancel(id)` |
 | `players` | `sam.players()`: lista de `{name, uuid}` de los jugadores en línea |
 | `chat` | `sam.tell(nombre, texto)` y `sam.broadcast(texto)` (texto plano, ≤ 256 caracteres) |
+| `permissions` | `sam.has(jugador, nodo)` y `sam.meta(jugador, clave)`, solo lectura (`docs/PERMISOS.md`, sección 5); con esta capacidad, `sam.command` acepta `{node = "..."}` |
 | `storage` | `sam.store.get(clave)`, `sam.store.set(clave, valor)` (`nil` borra; devuelve si la clave ya existía) y `sam.store.keys()` (lista ordenada): datos del script que sobreviven a reinicios y a `/reload` (RS-LUA-02b) |
 | `commands` | `sam.command(nombre, fn[, {permission = 0..4}])` registra `/nombre` (RF-LUA-03). Al ejecutarse: `fn(jugador, texto, args)` con el jugador como `{name, uuid}` (o `nil` si es la consola), el texto después del nombre y una lista con sus palabras. Si `fn` devuelve un valor, es la respuesta para quien lo ejecutó |
 

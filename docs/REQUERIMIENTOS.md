@@ -46,7 +46,7 @@ SAM es un mod nativo de **Fabric** que reemplaza a EssentialsX (plugin de Bukkit
 | `sam-client` | cliente | Pantalla de login y 2FA, *pinning* de la identidad del servidor, derivación de la contraseña, runtime de Lua (cliente) y consentimiento |
 | `sam-signer` | CLI aparte | Generación de claves, firma de scripts y emisión de certificados, todo **fuera del servidor** |
 
-- Permisos: `fabric-permissions-api` (Lucko), lo que da compatibilidad con LuckPerms. Sin un proveedor de permisos se usa el fallback por nivel de OP.
+- Permisos: **SAM trae su propio sistema de grupos y nodos** y se registra como proveedor de `fabric-permissions-api` (Lucko), así que los demás mods también le preguntan a SAM. Si está instalado LuckPerms, SAM le cede el control. Lo indefinido cae en el nivel de OP. Detalle en `docs/PERMISOS.md` (RF-PERM).
 - Build: Gradle multi-proyecto con Fabric Loom y mappings oficiales de Mojang.
 
 ## 4. Módulo Essentials (paridad con EssentialsX)
@@ -64,6 +64,18 @@ Cada comando tiene un nodo de permiso `sam.command.<nombre>` y es configurable (
 | RF-ESS-07 | Kits | Kits definidos en configuración, con cooldown y permiso por kit | Media |
 | RF-ESS-08 | Chat | Formato con placeholders, colores por permiso, MOTD y reglas | Media |
 | RF-ESS-09 | Utilidades | `/sam reload`, `/sam info`, importador de datos de EssentialsX (userdata, warps, homes) | Media |
+
+### 4.1 Permisos (RF-PERM, detalle en `docs/PERMISOS.md`)
+
+| ID | Requisito |
+|---|---|
+| RF-PERM-01 | Grupos con peso y herencia, nodos con comodín (`a.*`, `*`) y negación, metas de texto (límites, prefijos) y vencimientos para nodos, metas y pertenencia a grupos. El grupo `default` aplica a todos. |
+| RF-PERM-02 | Resolución determinista: primero el jugador y después sus grupos de mayor a menor peso; en cada fuente gana la entrada más específica; la primera fuente con coincidencia decide; si ninguna, indefinido (el que pregunta usa su valor por defecto). |
+| RF-PERM-03 | Proveedor de `fabric-permissions-api` (permisos y metas). Si está LuckPerms, SAM le cede el control y lo avisa. |
+| RF-PERM-04 | Archivo `config/sam/permissions.json`, editable a mano, con lectura estricta; `/sam perms reload`. Inválido al arrancar: ningún permiso propio (OP como vanilla). Inválido al recargar: se mantiene lo anterior. |
+| RF-PERM-05 | Comandos `/sam perms` (grupos, usuarios, metas, check), sensibles según RS-ADM-01 y auditados (RF-ADM-06). |
+| RF-PERM-06 | Nodos que exigen sesión verificada (2FA completado en esa sesión): así se dan los permisos de staff (RF-ADM-04). |
+| RF-PERM-07 | Lua (capacidad `permissions`): `sam.has` y `sam.meta`, solo lectura; los comandos de scripts pueden exigir un nodo. |
 
 ## 5. Módulo de autenticación
 
@@ -152,7 +164,7 @@ Se valida en la fase 0: los timeouts de keep-alive mientras el jugador escribe o
 
 | ID | Seguridad |
 |---|---|
-| RS-ADM-01 | **Origen de los comandos sensibles** (RN-14). Comandos sensibles: `sam admin *`, `sam auth reset\|devices\|email`, `sam scripts trust`, `sam reload`, `sam audit *` y, con SAM activo, los vanilla `op`, `deop`, `ban-ip` y `whitelist`. Se aceptan desde la **consola real del servidor (stdin)** y desde admins verificados en el juego (salvo los reservados a la consola, como RF-ADM-07 y RF-ADM-08). **RCON**: bloqueado por defecto, habilitable con `SAM_RCON_SENSITIVE_COMMANDS=true`. **Bloques de comando, funciones de datapacks y Lua: nunca.** |
+| RS-ADM-01 | **Origen de los comandos sensibles** (RN-14). Comandos sensibles: `sam admin *`, `sam auth reset\|devices\|email`, `sam scripts trust`, `sam perms *`, `sam reload`, `sam audit *` y, con SAM activo, los vanilla `op`, `deop`, `ban-ip` y `whitelist`. Se aceptan desde la **consola real del servidor (stdin)** y desde admins verificados en el juego (salvo los reservados a la consola, como RF-ADM-07 y RF-ADM-08). **RCON**: bloqueado por defecto, habilitable con `SAM_RCON_SENSITIVE_COMMANDS=true`. **Bloques de comando, funciones de datapacks y Lua: nunca.** |
 
 ### 5.5 "Entrar con Google" y Discord (OAuth 2.0 / OpenID Connect)
 
@@ -407,6 +419,8 @@ SAM_POLICY_DEFAULT_SESSION_TTL=7d
 SAM_AUDIT_IP_RETENTION=90d
 
 # ===== Scripts Lua =====
+SAM_ADMIN_OP_LEVEL=2                                # nivel de OP desde el que se es admin (RF-ADM-02)
+SAM_RCON_SENSITIVE_COMMANDS=false                   # comandos sensibles por RCON (RS-ADM-01)
 SAM_SCRIPTS_ENABLED=true
 SAM_SCRIPTS_TRUSTED_KEYS=config/sam/keys/trusted/   # claves públicas (se confirman desde la consola)
 SAM_SCRIPTS_DEV_MODE=false                          # permite scripts sin firmar SOLO del lado servidor
