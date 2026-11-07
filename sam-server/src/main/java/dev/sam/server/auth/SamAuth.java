@@ -1,6 +1,8 @@
 package dev.sam.server.auth;
 
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -17,6 +19,12 @@ import dev.sam.common.identity.ServerId;
 import dev.sam.common.proto.ProtocolException;
 import dev.sam.common.proto.SamReader;
 import dev.sam.common.proto.SamWriter;
+import dev.sam.common.oauth.OAuthStates;
+import dev.sam.common.proto.account.OAuthCode;
+import dev.sam.common.proto.account.OAuthProvider;
+import dev.sam.common.proto.account.OAuthStart;
+import dev.sam.common.proto.account.OAuthUrl;
+import dev.sam.common.proto.auth.AuthResult;
 import dev.sam.common.proto.auth.AuthPolicyView;
 import dev.sam.common.proto.auth.HelloAck;
 import dev.sam.common.proto.auth.LoginPassword;
@@ -45,9 +53,14 @@ public final class SamAuth {
     public static final CustomPacketPayload.Type<SamPayload> HELLO_ACK = SamPayload.type("hello_ack");
     public static final CustomPacketPayload.Type<SamPayload> REGISTER = SamPayload.type("register");
     public static final CustomPacketPayload.Type<SamPayload> LOGIN_PASSWORD = SamPayload.type("login_password");
+    public static final CustomPacketPayload.Type<SamPayload> OAUTH_START = SamPayload.type(OAuthStart.ID);
+    public static final CustomPacketPayload.Type<SamPayload> OAUTH_URL = SamPayload.type(OAuthUrl.ID);
+    public static final CustomPacketPayload.Type<SamPayload> OAUTH_CODE = SamPayload.type(OAuthCode.ID);
 
     static final ConfigurationTask.Type TASK = new ConfigurationTask.Type("sam:auth");
     static final int TIMEOUT_SECONDS = 120;
+    /** Mientras hay un flujo OAuth abierto (el jugador está en el navegador), PROTOCOLO.md 5. */
+    static final int OAUTH_TIMEOUT_SECONDS = 300;
     static final int MAX_ATTEMPTS = 5;
     private static final int MAX_SERVER_MESSAGE = 256 * 1024;
 
@@ -56,11 +69,13 @@ public final class SamAuth {
     public static final String KICK_UNAVAILABLE = "Inicio de sesión no disponible. [SAM-K006]";
 
     /** Lo que se necesita para atender logins; hasta tenerlo, el login queda cerrado. */
-    public record Setup(AccountService accounts, ServerId serverId, AuthPolicyView policy) {
+    public record Setup(AccountService accounts, ServerId serverId, AuthPolicyView policy, Optional<GoogleSignIn> google) {
     }
 
     private final Logger log;
     private final Map<ServerConfigurationPacketListenerImpl, LoginFlow> flows = new ConcurrentHashMap<>();
+    /** Conexiones cuyo plazo se extendió por OAuth: el plazo normal ya no las expulsa. */
+    private final Set<ServerConfigurationPacketListenerImpl> extended = ConcurrentHashMap.newKeySet();
     private final ExecutorService hashing = Executors.newFixedThreadPool(2, daemon("SAM Argon2"));
     private final ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor(daemon("SAM auth timeout"));
     private volatile Setup setup;
@@ -76,9 +91,23 @@ public final class SamAuth {
         PayloadTypeRegistry.configurationC2S().register(HELLO_ACK, SamPayload.codec(HELLO_ACK, HelloAck.MAX_BYTES));
         PayloadTypeRegistry.configurationC2S().register(REGISTER, SamPayload.codec(REGISTER, Register.MAX_BYTES));
         PayloadTypeRegistry.configurationC2S().register(LOGIN_PASSWORD, SamPayload.codec(LOGIN_PASSWORD, LoginPassword.MAX_BYTES));
+        PayloadTypeRegistry.configurationC2S().register(OAUTH_START, SamPayload.codec(OAUTH_START, OAuthStart.MAX_BYTES));
+        PayloadTypeRegistry.configurationC2S().register(OAUTH_CODE, SamPayload.codec(OAUTH_CODE, OAuthCode.MAX_BYTES));
+        PayloadTypeRegistry.configurationS2C().register(OAUTH_URL, SamPayload.codec(OAUTH_URL, MAX_SERVER_MESSAGE));
 
         ServerConfigurationConnectionEvents.CONFIGURE.register(this::configure);
-        ServerConfigurationConnectionEvents.DISCONNECT.register((handler, server) -> flows.remove(handler));
+        ServerConfigurationConnectionEvents.DISCONNECT.register((handler, server) -> {
+            flows.remove(handler);
+            extended.remove(handler);
+            var ready = setup;
+            if (ready != null) {
+                ready.google().ifPresent(google -> google.forget(handler));
+            }
+        });
+        ServerConfigurationNetworking.registerGlobalReceiver(OAUTH_START,
+            (payload, context) -> oauthStart(context.networkHandler(), context.server(), payload));
+        ServerConfigurationNetworking.registerGlobalReceiver(OAUTH_CODE,
+            (payload, context) -> oauthCode(context.networkHandler(), context.server(), payload));
         ServerConfigurationNetworking.registerGlobalReceiver(HELLO_ACK,
             (payload, context) -> receive(context.networkHandler(), context.server(), payload, HelloAck.MAX_BYTES, HelloAck::read,
                 LoginFlow::onHelloAck));
@@ -127,7 +156,7 @@ public final class SamAuth {
             var hello = flow.hello();
             sender.accept(ServerConfigurationNetworking.createS2CPacket(new SamPayload(HELLO, encode(hello::write))));
             timer.schedule(() -> server.execute(() -> {
-                if (flows.get(handler) == flow && !flow.done()) {
+                if (flows.get(handler) == flow && !flow.done() && !extended.contains(handler)) {
                     log.info("[auditoría] {} no completó el login en {} s", nick, TIMEOUT_SECONDS);
                     handler.disconnect(Component.literal(KICK_TIMEOUT));
                 }
@@ -170,6 +199,67 @@ public final class SamAuth {
             }
             server.execute(() -> apply(handler, nick, flow, reply));
         });
+    }
+
+    /** "Entrar con Google" (PROTOCOLO.md 5.4): abre el flujo y manda la URL; el plazo pasa a 300 s. */
+    private void oauthStart(ServerConfigurationPacketListenerImpl handler, MinecraftServer server, SamPayload payload) {
+        var flow = flows.get(handler);
+        var nick = handler.getOwner().getName();
+        var google = setup == null ? Optional.<GoogleSignIn>empty() : setup.google();
+        try {
+            if (flow == null) {
+                throw new ProtocolException(ProtocolException.OUT_OF_STATE, "mensaje sin login en curso");
+            }
+            var start = SamReader.decode(Unpooled.wrappedBuffer(payload.data()), OAuthStart.MAX_BYTES, OAuthStart::read);
+            flow.startOAuth();
+            if (google.isEmpty() || start.provider() != OAuthProvider.GOOGLE) {
+                ServerConfigurationNetworking.send(handler, new SamPayload(AUTH_RESULT, encode(new AuthResult(AuthResult.Status.FAILED,
+                    Optional.empty(), Optional.of("Ese método no está habilitado en este servidor"))::write)));
+                return;
+            }
+            var url = google.get().start(handler, nick, OAuthStates.Purpose.LOGIN, start.port());
+            ServerConfigurationNetworking.send(handler, new SamPayload(OAUTH_URL, encode(new OAuthUrl(url)::write)));
+            if (extended.add(handler)) {
+                timer.schedule(() -> server.execute(() -> {
+                    if (flows.get(handler) == flow && !flow.done()) {
+                        log.info("[auditoría] {} no completó el login con Google en {} s", nick, OAUTH_TIMEOUT_SECONDS);
+                        handler.disconnect(Component.literal(KICK_TIMEOUT));
+                    }
+                }), OAUTH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            }
+        } catch (ProtocolException e) {
+            protocolError(handler, nick, e);
+        }
+    }
+
+    /** El código que llegó al loopback del cliente: canje y validación fuera del hilo del servidor. */
+    private void oauthCode(ServerConfigurationPacketListenerImpl handler, MinecraftServer server, SamPayload payload) {
+        var flow = flows.get(handler);
+        var nick = handler.getOwner().getName();
+        OAuthCode code;
+        try {
+            if (flow == null || setup == null || setup.google().isEmpty()) {
+                throw new ProtocolException(ProtocolException.OUT_OF_STATE, "código OAuth sin flujo abierto");
+            }
+            code = SamReader.decode(Unpooled.wrappedBuffer(payload.data()), OAuthCode.MAX_BYTES, OAuthCode::read);
+        } catch (ProtocolException e) {
+            protocolError(handler, nick, e);
+            return;
+        }
+        setup.google().get().finish(handler, code).whenComplete((verified, error) -> server.execute(() -> {
+            // Solo vale un flujo de login abierto por esta conexión y para este mismo nick
+            var sub = verified == null ? Optional.<String>empty() : verified
+                .filter(v -> v.pending().purpose() == OAuthStates.Purpose.LOGIN && v.pending().nick().equals(nick))
+                .flatMap(GoogleSignIn.Verified::sub);
+            if (error != null) {
+                log.warn("Error al verificar Google de {}: {}", nick, error.toString());
+            }
+            try {
+                apply(handler, nick, flow, flow.onGoogle(sub));
+            } catch (ProtocolException e) {
+                protocolError(handler, nick, e);
+            }
+        }));
     }
 
     private void apply(ServerConfigurationPacketListenerImpl handler, String nick, LoginFlow flow, LoginFlow.Reply reply) {

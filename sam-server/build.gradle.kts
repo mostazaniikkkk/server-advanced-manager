@@ -22,6 +22,9 @@ dependencies {
     implementation(libs.bouncycastle.pkix)
     include(libs.bouncycastle.pkix)
     include(libs.bouncycastle.util)
+    // ID token de Google (RS-OAUTH-05)
+    implementation(libs.nimbus.jose.jwt)
+    include(libs.nimbus.jose.jwt)
     implementation(libs.netty.codec.http)
     include(libs.netty.codec.http)
 }

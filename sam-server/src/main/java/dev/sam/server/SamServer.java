@@ -39,6 +39,8 @@ import dev.sam.common.net.gate.SamRoutes;
 import dev.sam.common.proto.auth.AuthMethod;
 import dev.sam.common.proto.auth.AuthPolicyView;
 import dev.sam.common.proto.auth.EmailVerify;
+import dev.sam.server.auth.GoogleSignIn;
+import dev.sam.server.auth.SamAccount;
 import dev.sam.server.auth.SamAuth;
 import io.netty.channel.ChannelPipeline;
 import net.fabricmc.api.DedicatedServerModInitializer;
@@ -52,6 +54,7 @@ public final class SamServer implements DedicatedServerModInitializer {
 
     static final String PASSWORD_MIN_LENGTH = "SAM_PASSWORD_MIN_LENGTH";
     private static final SamAuth AUTH = new SamAuth(LOGGER);
+    private static final SamAccount ACCOUNT = new SamAccount(LOGGER);
 
     static final String KICK_MESSAGE = "Este servidor requiere SAM Client para entrar. [SAM-K001]";
 
@@ -86,6 +89,7 @@ public final class SamServer implements DedicatedServerModInitializer {
             .orElse("?");
         LOGGER.info("SAM Server {} cargado. Núcleo: {}", version, coreSmokeCheck());
         AUTH.install();
+        ACCOUNT.install();
         TransportConfig transport;
         Map<String, String> config;
         try {
@@ -165,7 +169,10 @@ public final class SamServer implements DedicatedServerModInitializer {
         var file = FabricLoader.getInstance().getConfigDir().resolve("sam/accounts.json");
         try {
             var minPassword = Integer.parseInt(config.getOrDefault(PASSWORD_MIN_LENGTH, "6").strip());
-            var policy = new AuthPolicyView(List.of(AuthMethod.PASSWORD), false, false, EmailVerify.LATER, minPassword);
+            // "Entrar con Google" solo con credenciales del operador (REQUERIMIENTOS 5.5); el secreto no se muestra
+            var google = GoogleSignIn.fromConfig(config);
+            var methods = google.isPresent() ? List.of(AuthMethod.PASSWORD, AuthMethod.GOOGLE) : List.of(AuthMethod.PASSWORD);
+            var policy = new AuthPolicyView(methods, false, false, EmailVerify.LATER, minPassword);
             var accounts = new AccountService(AccountsFile.load(file), Argon2Params.SERVER_DEFAULT, new SecureRandom(),
                 all -> {
                     try {
@@ -174,8 +181,10 @@ public final class SamServer implements DedicatedServerModInitializer {
                         throw new UncheckedIOException("No se pudieron guardar las cuentas en " + file, e);
                     }
                 });
-            AUTH.activate(new SamAuth.Setup(accounts, serverId, policy));
-            LOGGER.info("Login de SAM abierto: contraseña; {} cuentas en {}", AccountsFile.load(file).size(), file);
+            AUTH.activate(new SamAuth.Setup(accounts, serverId, policy, google));
+            ACCOUNT.activate(new SamAccount.Setup(accounts, google));
+            LOGGER.info("Login de SAM abierto: contraseña{}; {} cuentas en {}",
+                google.map(g -> " y Google (client_id " + g.clientId() + ")").orElse(""), AccountsFile.load(file).size(), file);
             return true;
         } catch (IOException | IllegalArgumentException e) {
             LOGGER.error("Cuentas o política de login inválidas: {}. El login de SAM queda cerrado.", e.getMessage());

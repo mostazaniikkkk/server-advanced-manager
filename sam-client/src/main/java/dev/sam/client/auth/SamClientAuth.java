@@ -11,6 +11,9 @@ import dev.sam.client.net.SamPayload;
 import dev.sam.common.proto.ProtocolException;
 import dev.sam.common.proto.SamReader;
 import dev.sam.common.proto.SamWriter;
+import dev.sam.common.proto.account.OAuthCode;
+import dev.sam.common.proto.account.OAuthStart;
+import dev.sam.common.proto.account.OAuthUrl;
 import dev.sam.common.proto.auth.AuthResult;
 import dev.sam.common.proto.auth.Hello;
 import dev.sam.common.proto.auth.HelloAck;
@@ -36,6 +39,9 @@ public final class SamClientAuth {
     public static final CustomPacketPayload.Type<SamPayload> HELLO_ACK = SamPayload.type("hello_ack");
     public static final CustomPacketPayload.Type<SamPayload> REGISTER = SamPayload.type("register");
     public static final CustomPacketPayload.Type<SamPayload> LOGIN_PASSWORD = SamPayload.type("login_password");
+    public static final CustomPacketPayload.Type<SamPayload> OAUTH_START = SamPayload.type(OAuthStart.ID);
+    public static final CustomPacketPayload.Type<SamPayload> OAUTH_URL = SamPayload.type(OAuthUrl.ID);
+    public static final CustomPacketPayload.Type<SamPayload> OAUTH_CODE = SamPayload.type(OAuthCode.ID);
 
     private static final int MAX_SERVER_MESSAGE = 256 * 1024;
 
@@ -53,6 +59,15 @@ public final class SamClientAuth {
         PayloadTypeRegistry.configurationC2S().register(HELLO_ACK, SamPayload.codec(HELLO_ACK, HelloAck.MAX_BYTES));
         PayloadTypeRegistry.configurationC2S().register(REGISTER, SamPayload.codec(REGISTER, Register.MAX_BYTES));
         PayloadTypeRegistry.configurationC2S().register(LOGIN_PASSWORD, SamPayload.codec(LOGIN_PASSWORD, LoginPassword.MAX_BYTES));
+        PayloadTypeRegistry.configurationC2S().register(OAUTH_START, SamPayload.codec(OAUTH_START, OAuthStart.MAX_BYTES));
+        PayloadTypeRegistry.configurationC2S().register(OAUTH_CODE, SamPayload.codec(OAUTH_CODE, OAuthCode.MAX_BYTES));
+        PayloadTypeRegistry.configurationS2C().register(OAUTH_URL, SamPayload.codec(OAUTH_URL, MAX_SERVER_MESSAGE));
+        ClientConfigurationNetworking.registerGlobalReceiver(OAUTH_URL, (payload, context) -> {
+            var url = decode(payload, OAuthUrl::read, context.responseSender());
+            if (url != null) {
+                context.client().execute(() -> GoogleFlow.onUrl(url.url()));
+            }
+        });
 
         ClientConfigurationNetworking.registerGlobalReceiver(HELLO, (payload, context) -> {
             var hello = decode(payload, Hello::read, context.responseSender());

@@ -12,7 +12,10 @@ import org.lwjgl.glfw.GLFW;
 import dev.sam.client.SamClient;
 import dev.sam.client.net.SamClientNet;
 import dev.sam.common.auth.PasswordDerivation;
+import dev.sam.common.proto.account.OAuthCode;
+import dev.sam.common.proto.account.OAuthStart;
 import dev.sam.common.proto.auth.AccountState;
+import dev.sam.common.proto.auth.AuthMethod;
 import dev.sam.common.proto.auth.AuthResult;
 import dev.sam.common.proto.auth.Hello;
 import dev.sam.common.proto.auth.LoginPassword;
@@ -68,6 +71,7 @@ public final class AuthScreen extends Screen {
     private EditBox email;
     private Button submit;
     private Button toggle;
+    private Button google;
     private boolean visible;
     private boolean busy;
     private Component status = Component.empty();
@@ -99,7 +103,7 @@ public final class AuthScreen extends Screen {
         // Alto del panel: cabecera, campos (con su validación en la misma línea de la etiqueta),
         // botones, estado y pie. Cabe en la ventana por defecto (854×480 a escala automática).
         var rows = registering ? 3 : 1;
-        panelHeight = HEADER + rows * ROW + 2 + 20 + 30;
+        panelHeight = HEADER + rows * ROW + 2 + 20 + 30 + (googleOffered() ? 24 : 0);
         panelTop = Math.max(4, (height - panelHeight) / 2);
         fieldsTop = panelTop + HEADER;
         var x = (width - FIELD_WIDTH) / 2;
@@ -121,6 +125,10 @@ public final class AuthScreen extends Screen {
             b -> submit()).bounds(x, buttonsY, FIELD_WIDTH * 2 / 3 - 2, 20).build());
         addRenderableWidget(Button.builder(Component.literal("Salir"), b -> leave())
             .bounds(x + FIELD_WIDTH * 2 / 3 + 2, buttonsY, FIELD_WIDTH / 3 - 2, 20).build());
+        if (googleOffered()) {
+            google = addRenderableWidget(Button.builder(Component.literal("Entrar con Google"), b -> signInWithGoogle())
+                .bounds(x, buttonsY + 24, FIELD_WIDTH, 20).build());
+        }
         setInitialFocus(password);
         var window = minecraft.getWindow().getWindow();
         if (previousLockKeyMods < 0) {
@@ -190,6 +198,42 @@ public final class AuthScreen extends Screen {
         if (submit != null) {
             submit.active = !busy && ready();
         }
+        if (google != null) {
+            google.active = !busy;
+        }
+    }
+
+    // ===== Entrar con Google (REQUERIMIENTOS 5.5) =====
+
+    /** Solo a quien ya tiene cuenta: no hay registro con Google (RF-OAUTH-01). */
+    private boolean googleOffered() {
+        return !registering && hello.policy().methods().contains(AuthMethod.GOOGLE);
+    }
+
+    private void signInWithGoogle() {
+        if (busy) {
+            return;
+        }
+        busy = true;
+        refresh();
+        setStatus("Abriendo el navegador: elige tu cuenta de Google", Tone.BUSY);
+        GoogleFlow.begin(new GoogleFlow.Callbacks() {
+            @Override
+            public void sendStart(OAuthStart start) {
+                SamClientAuth.send(SamClientAuth.OAUTH_START, start::write);
+            }
+
+            @Override
+            public void sendCode(OAuthCode code) {
+                setStatus("Verificando tu cuenta de Google", Tone.BUSY);
+                SamClientAuth.send(SamClientAuth.OAUTH_CODE, code::write);
+            }
+
+            @Override
+            public void failed(String reason) {
+                fail(reason);
+            }
+        });
     }
 
     // ===== Envío =====
@@ -255,6 +299,7 @@ public final class AuthScreen extends Screen {
 
     @Override
     public void removed() {
+        GoogleFlow.cancel();
         if (previousLockKeyMods >= 0) {
             GLFW.glfwSetInputMode(minecraft.getWindow().getWindow(), GLFW.GLFW_LOCK_KEY_MODS, previousLockKeyMods);
         }
