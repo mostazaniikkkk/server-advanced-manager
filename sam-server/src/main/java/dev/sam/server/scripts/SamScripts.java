@@ -68,6 +68,12 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
     private Object installedOn;
     private final java.util.Set<String> installed = new HashSet<>();
 
+    /** Dónde se guardan los datos de los scripts ({@code storage}); vacío si no se pudo saber. */
+    private Optional<Path> dataDir = Optional.empty();
+    private final Map<String, dev.sam.common.lua.ScriptStore> stores = new HashMap<>();
+    private int ticksSinceSave;
+    private static final int SAVE_TICKS = 100;
+
     private SamScripts(Logger log, Path keys, boolean devMode, ScriptLimits limits, ServerDelivery.OnReject onReject) {
         this.log = log;
         this.keys = keys;
@@ -85,7 +91,7 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
      * Registra todo (una vez, al iniciar el mod, después del login), salvo que {@value #ENABLED} sea
      * {@code false}.
      */
-    public static Optional<SamScripts> install(Logger log, Path keys, Map<String, String> config) {
+    public static Optional<SamScripts> install(Logger log, Path keys, Map<String, String> config, Optional<Path> dataDir) {
         if (config.getOrDefault(ENABLED, "true").strip().equalsIgnoreCase("false")) {
             log.info("Scripts de SAM desactivados ({}=false)", ENABLED);
             return Optional.empty();
@@ -106,6 +112,7 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
             log.warn("MODO DESARROLLO DE SCRIPTS ACTIVO: se aceptan scripts sin firmar del lado servidor ({}=true)", DEV_MODE);
         }
         var scripts = new SamScripts(log, keys, devMode, limits, onReject);
+        scripts.dataDir = dataDir;
         scripts.delivery.install();
         scripts.installMessages();
         ResourceManagerHelper.get(PackType.SERVER_DATA).registerReloadListener(scripts);
@@ -113,8 +120,18 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
         // Los comandos de los scripts entran al árbol cuando existe: al terminar de arrancar y tras cada /reload
         ServerLifecycleEvents.SERVER_STARTED.register(scripts::installCommands);
         ServerLifecycleEvents.END_DATA_PACK_RELOAD.register((s, resources, success) -> scripts.installCommands(s));
-        ServerLifecycleEvents.SERVER_STOPPED.register(s -> scripts.host.load(List.of()));
-        ServerTickEvents.END_SERVER_TICK.register(s -> scripts.host.tick());
+        ServerLifecycleEvents.SERVER_STOPPED.register(s -> {
+            scripts.host.load(List.of());
+            scripts.saveStores();
+        });
+        ServerTickEvents.END_SERVER_TICK.register(s -> {
+            scripts.host.tick();
+            // Los datos guardados de los scripts van al disco a lo sumo cada 5 s, y solo si cambiaron
+            if (++scripts.ticksSinceSave >= SAVE_TICKS) {
+                scripts.ticksSinceSave = 0;
+                scripts.saveStores();
+            }
+        });
         // Los eventos se encolan en el hilo del servidor: JOIN llega antes de que el jugador esté en la lista
         // y DISCONNECT puede llegar desde un hilo de red. Lua solo corre en el hilo del servidor.
         ServerPlayConnectionEvents.JOIN.register((handler, sender, s) ->
@@ -140,6 +157,53 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
                     .then(Commands.literal("confirm").then(Commands.argument("key_id", StringArgumentType.word())
                         .executes(c -> scripts.trustConfirm(c.getSource(), StringArgumentType.getString(c, "key_id")))))))));
         return Optional.of(scripts);
+    }
+
+    // ===== storage (RS-LUA-02b): <mundo>/sam/scripts/<id>.dat =====
+
+    private Optional<dev.sam.common.lua.ScriptStore> store(String script) {
+        if (dataDir.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(stores.computeIfAbsent(script, id -> {
+            var file = dataDir.get().resolve(id + ".dat");
+            if (!java.nio.file.Files.exists(file)) {
+                return new dev.sam.common.lua.ScriptStore();
+            }
+            try {
+                return dev.sam.common.lua.ScriptStore.decode(java.nio.file.Files.readAllBytes(file));
+            } catch (IOException | dev.sam.common.proto.ProtocolException e) {
+                var bad = file.resolveSibling(id + ".dat.bad");
+                log.error("Los datos guardados del script {} están dañados ({}): se apartan en {} y el script empieza vacío", id,
+                    e.getMessage(), bad);
+                try {
+                    java.nio.file.Files.move(file, bad, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                } catch (IOException moveError) {
+                    log.error("No se pudo apartar {}: {}", file, moveError.getMessage());
+                }
+                return new dev.sam.common.lua.ScriptStore();
+            }
+        }));
+    }
+
+    private void saveStores() {
+        for (var entry : stores.entrySet()) {
+            var store = entry.getValue();
+            if (!store.dirty()) {
+                continue;
+            }
+            var file = dataDir.orElseThrow().resolve(entry.getKey() + ".dat");
+            try {
+                java.nio.file.Files.createDirectories(file.getParent());
+                var tmp = java.nio.file.Files.createTempFile(file.getParent(), entry.getKey(), ".tmp");
+                java.nio.file.Files.write(tmp, store.encode());
+                java.nio.file.Files.move(tmp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                    java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+                store.saved();
+            } catch (IOException e) {
+                log.error("No se pudieron guardar los datos del script {}: {}", entry.getKey(), e.getMessage());
+            }
+        }
     }
 
     /** {@code sam:lua_msg} (PROTOCOLO.md 5.7): entre la parte de cliente y la de servidor de un mismo script. */
@@ -432,6 +496,11 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
         @Override
         public void log(String script, String text) {
             log.info("[script {}] {}", script, text);
+        }
+
+        @Override
+        public Optional<dev.sam.common.lua.ScriptStore> store(String script) {
+            return SamScripts.this.store(script);
         }
 
         @Override

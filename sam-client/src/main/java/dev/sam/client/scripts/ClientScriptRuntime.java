@@ -10,7 +10,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Properties;
 
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
@@ -74,8 +73,7 @@ final class ClientScriptRuntime implements ScriptHost.ClientBridge {
     private final Map<String, ResourceLocation> textures = new HashMap<>();
     private int nextTexture;
     /** script-keys.properties en memoria: se lee al entrar y se guarda después de cargar, nunca dentro de Lua. */
-    private final Properties keyChoices = new Properties();
-    private boolean keyChoicesChanged;
+    private dev.sam.common.lua.ScriptKeys keyChoices = dev.sam.common.lua.ScriptKeys.parse("");
 
     ClientScriptRuntime(Logger log, Path keysFile) {
         this.log = log;
@@ -88,6 +86,14 @@ final class ClientScriptRuntime implements ScriptHost.ClientBridge {
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> client.execute(this::stop));
         ClientTickEvents.END_CLIENT_TICK.register(this::tick);
         HudRenderCallback.EVENT.register((graphics, delta) -> renderHud(graphics));
+        // Menú de pausa → "Teclas de scripts", si los scripts de este servidor usan teclas
+        net.fabricmc.fabric.api.client.screen.v1.ScreenEvents.AFTER_INIT.register((client, screen, width, height) -> {
+            if (screen instanceof net.minecraft.client.gui.screens.PauseScreen && !keyChoices().isEmpty()) {
+                net.fabricmc.fabric.api.client.screen.v1.Screens.getButtons(screen).add(
+                    net.minecraft.client.gui.components.Button.builder(Component.literal("Teclas de scripts"),
+                        b -> client.setScreen(new ScriptKeysScreen(screen, this))).bounds(4, height - 24, 110, 20).build());
+            }
+        });
     }
 
     private void start() {
@@ -99,10 +105,52 @@ final class ClientScriptRuntime implements ScriptHost.ClientBridge {
         host.load(accepted.stream().map(r -> r.script()).toList());
         saveKeyChoices();
         running = !accepted.isEmpty();
+        devKeysScreen();
         for (var status : host.status()) {
             log.info("Script {} del servidor: {}", status.id(), status.state());
             status.errors().forEach(error -> log.warn("Script {}: {}", status.id(), error));
         }
+    }
+
+    /**
+     * Solo en desarrollo, {@code -Dsam.dev.keysScreen=nombre}: a los 3 s abre el menú de pausa (captura
+     * {@code nombre-pausa}), después "Teclas de scripts", cambia la primera tecla a J como si el jugador la
+     * apretara (captura {@code nombre}) y a los 2 s vuelve al juego.
+     */
+    private void devKeysScreen() {
+        var name = System.getProperty("sam.dev.keysScreen");
+        if (!net.fabricmc.loader.api.FabricLoader.getInstance().isDevelopmentEnvironment() || name == null) {
+            return;
+        }
+        var minecraft = Minecraft.getInstance();
+        var thread = new Thread(() -> {
+            try {
+                Thread.sleep(3000);
+                minecraft.execute(() -> minecraft.setScreen(new net.minecraft.client.gui.screens.PauseScreen(true)));
+                Thread.sleep(500);
+                minecraft.execute(() -> net.minecraft.client.Screenshot.grab(minecraft.gameDirectory, name + "-pausa.png",
+                    minecraft.getMainRenderTarget(), m -> log.info("[dev] Captura: {}", m.getString())));
+                Thread.sleep(300);
+                minecraft.execute(() -> {
+                    log.info("[dev] Abre Teclas de scripts");
+                    var screen = new ScriptKeysScreen(minecraft.screen, this);
+                    minecraft.setScreen(screen);
+                    screen.devRebindFirst(GLFW.GLFW_KEY_J);
+                });
+                Thread.sleep(2000);
+                minecraft.execute(() -> net.minecraft.client.Screenshot.grab(minecraft.gameDirectory, name + ".png",
+                    minecraft.getMainRenderTarget(), m -> log.info("[dev] Captura: {}", m.getString())));
+                Thread.sleep(300);
+                minecraft.execute(() -> {
+                    log.info("[dev] Cierra Teclas de scripts");
+                    minecraft.setScreen(null);
+                });
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }, "SAM dev keys");
+        thread.setDaemon(true);
+        thread.start();
     }
 
     private void stop() {
@@ -189,6 +237,29 @@ final class ClientScriptRuntime implements ScriptHost.ClientBridge {
     }
 
     @Override
+    public Optional<ScriptHost.GameState> game() {
+        var minecraft = Minecraft.getInstance();
+        var player = minecraft.player;
+        var connection = minecraft.getConnection();
+        if (player == null || minecraft.level == null || connection == null) {
+            return Optional.empty();
+        }
+        var inventory = player.getInventory();
+        var hotbar = new java.util.ArrayList<ScriptHost.Item>();
+        for (var slot = 0; slot < 9; slot++) {
+            var stack = inventory.getItem(slot);
+            hotbar.add(new ScriptHost.Item(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(),
+                stack.getCount()));
+        }
+        var players = connection.getOnlinePlayers().stream().map(info -> info.getProfile().getName()).sorted().toList();
+        var window = minecraft.getWindow();
+        return Optional.of(new ScriptHost.GameState(player.getGameProfile().getName(), player.getHealth(), player.getMaxHealth(),
+            player.getFoodData().getFoodLevel(), player.getX(), player.getY(), player.getZ(),
+            minecraft.level.dimension().location().toString(), hotbar, inventory.selected + 1, players, (int) window.getGuiScale(),
+            window.getGuiScaledWidth(), window.getGuiScaledHeight()));
+    }
+
+    @Override
     public void send(String script, String channel, byte[] data) {
         if (ClientPlayNetworking.canSend(SamClientScripts.LUA_MSG)) {
             var buf = Unpooled.buffer();
@@ -229,67 +300,105 @@ final class ClientScriptRuntime implements ScriptHost.ClientBridge {
 
     @Override
     public boolean bindKey(String script, String id, String key) {
-        var name = keyName(script, id, key);
-        if (name.equals("none")) {
+        var name = keyChoices.choose(server(), script, id, key);
+        if (name.equals(dev.sam.common.lua.ScriptKeys.NONE)) {
             return false;
         }
-        var code = glfw(name);
-        if (code < 0) {
-            log.warn("Tecla \"{}\" inválida para {}.{} en {}", name, script, id, keysFile);
+        var problem = conflict(name);
+        if (problem.isPresent()) {
+            log.info("El script {} pidió la tecla {} para \"{}\", pero {}: no se asigna", script, name, id, problem.get());
             return false;
         }
-        var input = InputConstants.Type.KEYSYM.getOrCreate(code);
-        for (var mapping : Minecraft.getInstance().options.keyMappings) {
-            if (KeyBindingHelper.getBoundKeyOf(mapping).equals(input)) {
-                log.info("El script {} pidió la tecla {} para \"{}\", pero ya la usa {}: no se asigna", script, name, id, mapping.getName());
-                return false;
-            }
-        }
-        if (keys.containsKey(code)) {
-            log.info("El script {} pidió la tecla {}, pero ya la tiene otro script: no se asigna", script, name);
-            return false;
-        }
-        keys.put(code, new Bound(script, id));
+        keys.put(glfw(name), new Bound(script, id));
         return true;
     }
 
-    /** La tecla que eligió el jugador en script-keys.properties; la primera vez se agrega la del script. */
-    private String keyName(String script, String id, String fallback) {
-        var server = SamClientNet.lastVerified().map(s -> s.hex().substring(0, 16)).orElse("local");
-        var entry = server + "." + script + "." + id;
-        var chosen = keyChoices.getProperty(entry);
-        if (chosen != null) {
-            return chosen.strip().toLowerCase(java.util.Locale.ROOT);
-        }
-        keyChoices.setProperty(entry, fallback);
-        keyChoicesChanged = true;
-        return fallback;
+    private static String server() {
+        return SamClientNet.lastVerified().map(s -> s.hex().substring(0, 16)).orElse("local");
     }
 
     private void loadKeyChoices() {
-        keyChoices.clear();
-        keyChoicesChanged = false;
+        var text = "";
         if (Files.exists(keysFile)) {
-            try (var in = Files.newBufferedReader(keysFile)) {
-                keyChoices.load(in);
+            try {
+                text = Files.readString(keysFile);
             } catch (IOException e) {
                 log.warn("No se pudo leer {}: {}", keysFile, e.getMessage());
             }
         }
+        keyChoices = dev.sam.common.lua.ScriptKeys.parse(text);
     }
 
     private void saveKeyChoices() {
-        if (!keyChoicesChanged) {
+        if (!keyChoices.dirty()) {
             return;
         }
         try {
             Files.createDirectories(keysFile.getParent());
-            try (var out = Files.newBufferedWriter(keysFile)) {
-                keyChoices.store(out, "Teclas de los scripts de servidor: <servidor>.<script>.<id>=<tecla> (a-z, 0-9, f1-f12 o none)");
-            }
+            Files.writeString(keysFile, keyChoices.text());
+            keyChoices.saved();
         } catch (IOException e) {
             log.warn("No se pudo guardar {}: {}", keysFile, e.getMessage());
         }
+    }
+
+    /** Las teclas de los scripts de este servidor, para la pantalla "Teclas de scripts". */
+    List<dev.sam.common.lua.ScriptKeys.Choice> keyChoices() {
+        return running ? keyChoices.of(server()) : List.of();
+    }
+
+    /**
+     * El jugador eligió otra tecla (o {@code none}) desde la pantalla "Teclas de scripts": vale en el acto.
+     *
+     * @return el motivo si no se puede usar
+     */
+    Optional<String> rebind(String script, String id, String key) {
+        keys.values().removeIf(bound -> bound.script().equals(script) && bound.id().equals(id));
+        if (!key.equals(dev.sam.common.lua.ScriptKeys.NONE)) {
+            var problem = conflict(key);
+            if (problem.isPresent()) {
+                // Vuelve a la que tenía
+                var previous = keyChoices.choose(server(), script, id, key);
+                if (!previous.equals(dev.sam.common.lua.ScriptKeys.NONE) && conflict(previous).isEmpty()) {
+                    keys.put(glfw(previous), new Bound(script, id));
+                }
+                return problem;
+            }
+            keys.put(glfw(key), new Bound(script, id));
+        }
+        keyChoices.set(server(), script, id, key);
+        saveKeyChoices();
+        return Optional.empty();
+    }
+
+    /** Si la tecla ya la usa una acción del juego, de otro mod o de otro script. */
+    private Optional<String> conflict(String name) {
+        var code = glfw(name);
+        var input = InputConstants.Type.KEYSYM.getOrCreate(code);
+        for (var mapping : Minecraft.getInstance().options.keyMappings) {
+            if (KeyBindingHelper.getBoundKeyOf(mapping).equals(input)) {
+                return Optional.of("ya la usa «" + Component.translatable(mapping.getName()).getString() + "»");
+            }
+        }
+        var other = keys.get(code);
+        if (other != null) {
+            return Optional.of("ya la usa el script " + other.script() + " (" + other.id() + ")");
+        }
+        return Optional.empty();
+    }
+
+    /** El nombre de una tecla de GLFW si un script la puede usar; vacío si no. */
+    static Optional<String> name(int code) {
+        if (code >= GLFW.GLFW_KEY_A && code <= GLFW.GLFW_KEY_Z) {
+            return Optional.of(String.valueOf((char) ('a' + code - GLFW.GLFW_KEY_A)));
+        }
+        if (code >= GLFW.GLFW_KEY_0 && code <= GLFW.GLFW_KEY_9) {
+            return Optional.of(String.valueOf((char) ('0' + code - GLFW.GLFW_KEY_0)));
+        }
+        if (code >= GLFW.GLFW_KEY_F1 && code <= GLFW.GLFW_KEY_F12) {
+            return Optional.of("f" + (code - GLFW.GLFW_KEY_F1 + 1));
+        }
+        return Optional.empty();
     }
 
     /** {@code a}..{@code z}, {@code 0}..{@code 9} o {@code f1}..{@code f12}; -1 si no es ninguna. */

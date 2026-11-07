@@ -103,7 +103,16 @@ public final class SamServer implements DedicatedServerModInitializer {
             return;
         }
         // Scripts Lua (RF-LUA-01..03): independientes del login; sin firma de confianza no corre nada
-        scripts = dev.sam.server.scripts.SamScripts.install(LOGGER, FabricLoader.getInstance().getConfigDir().resolve("sam/keys"), config);
+        Path scriptData;
+        try {
+            var gameDir = FabricLoader.getInstance().getGameDir();
+            scriptData = gameDir.resolve(levelName(gameDir)).resolve("sam/scripts");
+        } catch (IOException e) {
+            LOGGER.error("No se pudo leer server.properties: {}. Los scripts no guardan datos.", e.getMessage());
+            scriptData = null;
+        }
+        scripts = dev.sam.server.scripts.SamScripts.install(LOGGER, FabricLoader.getInstance().getConfigDir().resolve("sam/keys"), config,
+            Optional.ofNullable(scriptData));
         // Los límites aplican aunque el login de SAM quede cerrado: el vanilla también pasa por la compuerta
         ingress = new Ingress(ingress.policy(), ingress.routes(), transport.guard());
         loadIdentity(transport, config);
