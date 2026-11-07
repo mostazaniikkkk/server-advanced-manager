@@ -99,6 +99,10 @@ class ScriptCatalogTest {
             "mixto", firmado(archivos("mixto", "both", "", ""), CLAVE)), CONFIANZA, false);
         assertThat(ids(r)).containsExactly("mixto");
         assertThat(r.rejected()).isEmpty();
+        // Los de cliente (y los mixtos) quedan para entregarlos, con todos sus archivos firmados
+        assertThat(r.client()).extracting(c -> c.manifest().id()).containsExactly("mixto", "ui");
+        assertThat(r.client().get(1).files()).containsOnlyKeys("manifest.json", "main.lua", "signature.json");
+        assertThat(ScriptCatalog.build(Map.of("srv", servidor("srv", "")), CONFIANZA, false).client()).isEmpty();
     }
 
     @Test

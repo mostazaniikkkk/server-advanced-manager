@@ -440,8 +440,10 @@ S → C  sam:script_chunk        sha256, index: VarInt, total: VarInt, data: byt
           (el cliente verifica firma y hash al completar cada script; ver RS-SIG-05 y RF-LUA-05)
           → pantalla de consentimiento (protegida)
 C → S  sam:scripts_consent     accepted: List<String id> ≤ 128
-S → C  sam:done                (o kick SAM-K010 según SAM_SCRIPTS_CLIENT_ON_REJECT)
+          → el servidor termina la tarea sam:scripts (o kick SAM-K010 según SAM_SCRIPTS_CLIENT_ON_REJECT)
 ```
+
+La tarea `sam:scripts` va **después** de `sam:auth` y solo existe si el servidor tiene scripts de cliente verificados y su identidad cargada (la necesita para firmar la `keylist`). Un cliente que no registró `sam:scripts_offer` cuenta como si los rechazara todos. Sin respuesta en 300 s (el jugador está en la pantalla de consentimiento) → `SAM-K003`. `scripts_want` va una sola vez, antes de `scripts_consent`; cualquier otro orden, un hash pedido dos veces o un id no ofrecido → `SAM-P002`.
 
 Límite total de descarga por conexión: 16 MiB (configurable). Los fragmentos fuera de orden o de un hash no ofrecido → `SAM-P002`.
 

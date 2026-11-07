@@ -30,8 +30,12 @@ public final class ScriptCatalog {
     public record Rejected(String id, String reason) {
     }
 
-    /** Los scripts de servidor en orden de carga, los rechazados y los avisos para el operador. */
-    public record Result(List<ScriptHost.Package> server, List<Rejected> rejected, List<String> warnings) {
+    /** Un script de cliente verificado: su manifest y todos sus archivos (con {@code signature.json}). */
+    public record ClientScript(ScriptManifest manifest, Map<String, byte[]> files) {
+    }
+
+    /** Los scripts de servidor en orden de carga, los de cliente por id, los rechazados y los avisos. */
+    public record Result(List<ScriptHost.Package> server, List<ClientScript> client, List<Rejected> rejected, List<String> warnings) {
     }
 
     private ScriptCatalog() {
@@ -42,20 +46,24 @@ public final class ScriptCatalog {
         var rejected = new ArrayList<Rejected>();
         var warnings = new ArrayList<String>();
         var accepted = new TreeMap<String, ScriptHost.Package>();
+        var client = new ArrayList<ClientScript>();
         for (var entry : new TreeMap<>(folders).entrySet()) {
             var id = entry.getKey();
             try {
-                accept(id, entry.getValue(), trusted, devMode, warnings).ifPresent(p -> accepted.put(id, p));
+                accept(id, entry.getValue(), trusted, devMode, warnings, client).ifPresent(p -> accepted.put(id, p));
             } catch (IllegalArgumentException e) {
                 rejected.add(new Rejected(id, e.getMessage()));
             }
         }
-        return new Result(ordered(accepted, rejected), List.copyOf(rejected), List.copyOf(warnings));
+        return new Result(ordered(accepted, rejected), List.copyOf(client), List.copyOf(rejected), List.copyOf(warnings));
     }
 
-    /** @return el paquete si corre en el servidor; vacío si es de cliente; lanza con el motivo si se rechaza */
+    /**
+     * @return el paquete si corre en el servidor; vacío si es solo de cliente; lanza con el motivo si se
+     *     rechaza. Si corre en el cliente (siempre firmado: RS-SIG-04), se agrega a {@code client}.
+     */
     private static java.util.Optional<ScriptHost.Package> accept(String id, Map<String, byte[]> files,
-            Collection<SigningPublicKey> trusted, boolean devMode, List<String> warnings) {
+            Collection<SigningPublicKey> trusted, boolean devMode, List<String> warnings, List<ClientScript> client) {
         if (!FOLDER.matcher(id).matches()) {
             throw new IllegalArgumentException("el nombre de la carpeta debe ser [a-z0-9_], hasta 32");
         }
@@ -79,10 +87,14 @@ public final class ScriptCatalog {
             }
             warnings.add("El script " + id + " no está firmado: solo corre porque el modo desarrollo está activo");
         }
+        var sources = sources(files);
+        if (manifest.runsOnClient()) {
+            client.add(new ClientScript(manifest, Map.copyOf(files)));
+        }
         if (!manifest.runsOnServer()) {
             return java.util.Optional.empty();
         }
-        return java.util.Optional.of(new ScriptHost.Package(manifest, sources(files)));
+        return java.util.Optional.of(new ScriptHost.Package(manifest, sources));
     }
 
     /** Los módulos {@code .lua} del script, en orden de ruta; lanza si alguno no es UTF-8 (también lo usa el cliente). */

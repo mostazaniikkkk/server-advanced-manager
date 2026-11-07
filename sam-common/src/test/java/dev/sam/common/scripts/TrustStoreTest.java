@@ -106,4 +106,20 @@ class TrustStoreTest {
         Files.writeString(keys.resolve("confirmed.txt"), "basura\n\n" + PUB1.keyId().hex() + "\n");
         assertThat(TrustStore.load(keys).active()).containsExactly(PUB1);
     }
+
+    @Test
+    void lasClavesActivasLlevanElNombreDeSuArchivo() throws Exception {
+        clave("steve.pub", K1);
+        var largo = "ñ".repeat(40) + ".pub";
+        clave(largo, K2);
+        TrustStore.confirm(keys, PUB1.keyId());
+        TrustStore.confirm(keys, PUB2.keyId());
+        var store = TrustStore.load(keys);
+        assertThat(store.entries()).extracting(KeyList.Entry::key).containsExactlyInAnyOrder(PUB1, PUB2);
+        assertThat(store.entries()).filteredOn(e -> e.key().equals(PUB1)).singleElement()
+            .satisfies(e -> assertThat(e.label()).isEqualTo("steve"));
+        // La etiqueta cabe en la keylist (64 bytes en UTF-8) sin cortar un carácter
+        assertThat(store.entries()).filteredOn(e -> e.key().equals(PUB2)).singleElement()
+            .satisfies(e -> assertThat(e.label()).isEqualTo("ñ".repeat(32)));
+    }
 }

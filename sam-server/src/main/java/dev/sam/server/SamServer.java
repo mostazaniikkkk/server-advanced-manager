@@ -71,6 +71,9 @@ public final class SamServer implements DedicatedServerModInitializer {
     /** Solo con la identidad cargada: anunciar SAM sin poder atender TLS dejaría al cliente sin entrar. */
     private static volatile Optional<StatusAdvert> statusAdvert = Optional.empty();
 
+    /** Los scripts Lua, si están activos: firman su keylist con la identidad cuando se carga. */
+    private static Optional<dev.sam.server.scripts.SamScripts> scripts = Optional.empty();
+
     /** El campo sam de la respuesta de estado (PROTOCOLO.md 2.4); lo usa el mixin del estado. */
     public static Optional<StatusAdvert> statusAdvert() {
         return statusAdvert;
@@ -100,7 +103,7 @@ public final class SamServer implements DedicatedServerModInitializer {
             return;
         }
         // Scripts Lua (RF-LUA-01..03): independientes del login; sin firma de confianza no corre nada
-        dev.sam.server.scripts.SamScripts.install(LOGGER, FabricLoader.getInstance().getConfigDir().resolve("sam/keys"), config);
+        scripts = dev.sam.server.scripts.SamScripts.install(LOGGER, FabricLoader.getInstance().getConfigDir().resolve("sam/keys"), config);
         // Los límites aplican aunque el login de SAM quede cerrado: el vanilla también pasa por la compuerta
         ingress = new Ingress(ingress.policy(), ingress.routes(), transport.guard());
         loadIdentity(transport, config);
@@ -143,6 +146,7 @@ public final class SamServer implements DedicatedServerModInitializer {
             // Hasta que exista la auditoría encadenada, los eventos de la entrada van al log
             var realIp = transport.realIp(message -> LOGGER.warn("[auditoría] {}", message));
             var loginOpen = startAuth(identity.serverId(), config);
+            scripts.ifPresent(s -> s.identity(identity.privateKey()));
             ingress = new Ingress(transport.policy(), new SamRoutes(identity, transport.webSocketPath(), realIp, loginOpen),
                 ingress.guard());
             statusAdvert = Optional.of(new StatusAdvert(identity.serverId()));

@@ -22,7 +22,7 @@ public final class KeyList {
     public static final String TYPE = "keylist";
     public static final int VERSION = 1;
     private static final int MAX_KEYS = 64;
-    private static final int MAX_LABEL = 64;
+    static final int MAX_LABEL = 64;
 
     /** Una clave autorizada y su etiqueta (el nombre del {@code .pub}), para el consentimiento. */
     public record Entry(SigningPublicKey key, String label) {

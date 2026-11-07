@@ -2,6 +2,7 @@ package dev.sam.server.scripts;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.security.PrivateKey;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -18,6 +19,7 @@ import dev.sam.common.lua.ScriptHost;
 import dev.sam.common.lua.ScriptLimits;
 import dev.sam.common.scripts.KeyId;
 import dev.sam.common.scripts.ScriptCatalog;
+import dev.sam.common.scripts.ServerDelivery;
 import dev.sam.common.scripts.TrustStore;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
@@ -46,6 +48,7 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
     static final String ENABLED = "SAM_SCRIPTS_ENABLED";
     static final String MAX_MEMORY = "SAM_SCRIPTS_MAX_MEMORY";
     static final String MAX_CALL_MS = "SAM_SCRIPTS_MAX_CALL_MS";
+    static final String ON_REJECT = "SAM_SCRIPTS_CLIENT_ON_REJECT";
     private static final String FOLDER = "sam_scripts";
     private static final int MAX_FILE_BYTES = 512 * 1024;
 
@@ -53,24 +56,42 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
     private final Path keys;
     private final boolean devMode;
     private final ScriptHost host;
+    private final ClientScriptsDelivery delivery;
     private volatile MinecraftServer server;
     private Map<String, Map<String, byte[]>> folders = Map.of();
     /** Los comandos que SAM agregó al dispatcher actual (al recrearse con /reload, se empieza de cero). */
     private Object installedOn;
     private final java.util.Set<String> installed = new HashSet<>();
 
-    private SamScripts(Logger log, Path keys, boolean devMode, ScriptLimits limits) {
+    private SamScripts(Logger log, Path keys, boolean devMode, ScriptLimits limits, ServerDelivery.OnReject onReject) {
         this.log = log;
         this.keys = keys;
         this.devMode = devMode;
         this.host = new ScriptHost(new Bridge(), limits);
+        this.delivery = new ClientScriptsDelivery(log, onReject);
     }
 
-    /** Registra todo (una vez, al iniciar el mod), salvo que {@value #ENABLED} sea {@code false}. */
-    public static void install(Logger log, Path keys, Map<String, String> config) {
+    /** La clave de la identidad del servidor, para firmar la keylist que va a los clientes (RS-SIG-05). */
+    public void identity(PrivateKey key) {
+        delivery.identity(key);
+    }
+
+    /**
+     * Registra todo (una vez, al iniciar el mod, después del login), salvo que {@value #ENABLED} sea
+     * {@code false}.
+     */
+    public static Optional<SamScripts> install(Logger log, Path keys, Map<String, String> config) {
         if (config.getOrDefault(ENABLED, "true").strip().equalsIgnoreCase("false")) {
             log.info("Scripts de SAM desactivados ({}=false)", ENABLED);
-            return;
+            return Optional.empty();
+        }
+        ServerDelivery.OnReject onReject;
+        try {
+            onReject = ServerDelivery.OnReject.parse(config.getOrDefault(ON_REJECT, "per_script"));
+        } catch (IllegalArgumentException e) {
+            // Falla cerrado: rechazar cualquier script expulsa
+            log.error("{}. Se usa kick.", e.getMessage());
+            onReject = ServerDelivery.OnReject.KICK;
         }
         var devMode = config.getOrDefault(DEV_MODE, "false").strip().equalsIgnoreCase("true");
         var limits = new ScriptLimits(Duration.ofMillis(Long.parseLong(config.getOrDefault(MAX_CALL_MS, "50").strip())),
@@ -79,7 +100,8 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
             // RS-SIG-04: visible en el log; los scripts sin firma nunca van a los clientes
             log.warn("MODO DESARROLLO DE SCRIPTS ACTIVO: se aceptan scripts sin firmar del lado servidor ({}=true)", DEV_MODE);
         }
-        var scripts = new SamScripts(log, keys, devMode, limits);
+        var scripts = new SamScripts(log, keys, devMode, limits, onReject);
+        scripts.delivery.install();
         ResourceManagerHelper.get(PackType.SERVER_DATA).registerReloadListener(scripts);
         ServerLifecycleEvents.SERVER_STARTING.register(s -> scripts.server = s);
         // Los comandos de los scripts entran al árbol cuando existe: al terminar de arrancar y tras cada /reload
@@ -105,6 +127,7 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
                     .then(Commands.literal("list").executes(c -> scripts.trustList(c.getSource())))
                     .then(Commands.literal("confirm").then(Commands.argument("key_id", StringArgumentType.word())
                         .executes(c -> scripts.trustConfirm(c.getSource(), StringArgumentType.getString(c, "key_id")))))))));
+        return Optional.of(scripts);
     }
 
     /** Encola el evento para el próximo tick del hilo del servidor (nunca corre en el acto ni en otro hilo). */
@@ -165,6 +188,7 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
         } catch (IOException e) {
             log.error("No se pudo leer el trust store {}: {}. No corre ningún script.", keys, e.getMessage());
             host.load(List.of());
+            delivery.update(List.of(), List.of());
             return;
         }
         trust.problems().forEach(problem -> log.warn("Trust store: {}", problem));
@@ -180,12 +204,13 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
         catalog.warnings().forEach(log::warn);
         catalog.rejected().forEach(r -> log.error("Script {} rechazado: {}", r.id(), r.reason()));
         host.load(catalog.server());
+        delivery.update(catalog.client(), trust.entries());
         for (var status : host.status()) {
             status.errors().forEach(error -> log.error("Script {}: {}", status.id(), error));
         }
-        log.info("Scripts de SAM: {} cargados, {} rechazados", host.status().stream()
+        log.info("Scripts de SAM: {} cargados, {} rechazados, {} de cliente ofrecidos", host.status().stream()
             .filter(s -> s.state() == ScriptHost.State.RUNNING).count(), catalog.rejected().size()
-                + host.status().stream().filter(s -> s.state() != ScriptHost.State.RUNNING).count());
+                + host.status().stream().filter(s -> s.state() != ScriptHost.State.RUNNING).count(), delivery.offered());
     }
 
     // ===== Comandos (RF-LUA-07) =====

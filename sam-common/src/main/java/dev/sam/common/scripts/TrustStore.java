@@ -17,7 +17,7 @@ import java.util.stream.Collectors;
  * comando de consola {@code sam scripts trust confirm}: una clave agregada por alguien con acceso a los
  * archivos no se activa sola. Quitar el {@code .pub} la revoca.
  */
-public record TrustStore(List<SigningPublicKey> active, List<Pending> pending, List<String> problems) {
+public record TrustStore(List<KeyList.Entry> entries, List<Pending> pending, List<String> problems) {
 
     static final String TRUSTED = "trusted";
     static final String CONFIRMED = "confirmed.txt";
@@ -27,7 +27,7 @@ public record TrustStore(List<SigningPublicKey> active, List<Pending> pending, L
     }
 
     public TrustStore {
-        active = List.copyOf(active);
+        entries = List.copyOf(entries);
         pending = List.copyOf(pending);
         problems = List.copyOf(problems);
     }
@@ -35,7 +35,7 @@ public record TrustStore(List<SigningPublicKey> active, List<Pending> pending, L
     /** @param keys la carpeta {@code config/sam/keys} */
     public static TrustStore load(Path keys) throws IOException {
         var confirmed = confirmed(keys);
-        var active = new ArrayList<SigningPublicKey>();
+        var active = new ArrayList<KeyList.Entry>();
         var pending = new ArrayList<Pending>();
         var problems = new ArrayList<String>();
         var trusted = keys.resolve(TRUSTED);
@@ -52,12 +52,26 @@ public record TrustStore(List<SigningPublicKey> active, List<Pending> pending, L
             if (key.isEmpty()) {
                 problems.add(name + ": no es una clave pública Ed25519 en base64");
             } else if (confirmed.contains(key.get().keyId().hex())) {
-                active.add(key.get());
+                active.add(new KeyList.Entry(key.get(), label(name)));
             } else {
                 pending.add(new Pending(key.get().keyId(), name));
             }
         }
         return new TrustStore(active, pending, problems);
+    }
+
+    /** Las claves activas (confirmadas). */
+    public List<SigningPublicKey> active() {
+        return entries.stream().map(KeyList.Entry::key).toList();
+    }
+
+    /** El nombre del archivo sin {@code .pub}, acotado a lo que cabe en la keylist sin cortar un carácter. */
+    private static String label(String file) {
+        var label = file.substring(0, file.length() - ".pub".length());
+        while (label.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > KeyList.MAX_LABEL) {
+            label = label.substring(0, label.offsetByCodePoints(label.length(), -1));
+        }
+        return label;
     }
 
     /**
