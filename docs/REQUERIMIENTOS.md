@@ -26,7 +26,7 @@ SAM es un mod nativo de **Fabric** que reemplaza a EssentialsX (plugin de Bukkit
 | Transporte | **TLS 1.3 en toda la conexión**, desde el primer byte, con el certificado que genera el servidor (sección 6). Opcionalmente, **WebSocket** en el mismo puerto para usar Cloudflare (6.4). |
 | Proxies | Los **CDN** (Cloudflare) se soportan vía WebSocket. Los proxies de Minecraft (Velocity, BungeeCord) y las redes de varios servidores quedan fuera de alcance; la arquitectura no debe impedirlos a futuro. |
 | Registro | **Siempre con usuario/contraseña + correo (obligatorio, no configurable).** Google y TOTP se agregan después a una cuenta existente; nunca se registra una cuenta desde cero con ellos. |
-| Métodos de login | `password` (el más débil y el que viene por defecto), `totp`, `password_totp`, `google` y, opcionalmente, `discord` (5.0). El **administrador** define en el `.env` cuáles están disponibles y cuáles se exigen para cada grupo de permisos (8.2). |
+| Métodos de login | `password` (el más débil y el que viene por defecto), `google` y, opcionalmente, `discord` (5.0); el 2FA es un segundo paso sobre cualquiera de ellos. El **administrador** define en el `.env` cuáles están disponibles y si el 2FA se exige para cada grupo de permisos (8.2). |
 | 2FA | Opcional para jugadores y **obligatorio para administradores** (5.4) |
 | Google ↔ MC | **1 cuenta de Google = 1 cuenta de Minecraft** por servidor (fijo) |
 | Cambio de nick de un admin | **Pierde el rol.** Solo se restaura manualmente desde la **consola del servidor** (RF-ADM-08). |
@@ -72,16 +72,15 @@ Cada comando tiene un nodo de permiso `sam.command.<nombre>` y es configurable (
 | Método (`.env`) | Descripción | Nivel de seguridad | Por defecto |
 |---|---|---|---|
 | `password` | Usuario y contraseña | 1 (el más débil) | **Sí**: habilitado en una instalación limpia |
-| `totp` | Usuario y código TOTP, sin contraseña | 1 a 2 (ver nota) | No. **Deshabilitado para admins** salvo que el `.env` lo permita (RN-08) |
-| `password_totp` | Usuario, contraseña y código TOTP del autenticador | 2 | No |
 | `google` | "Entrar con Google" (OAuth/OIDC) | 2 | No (requiere configurar credenciales) |
 | `discord` | "Entrar con Discord" (OAuth 2.0), opcional | 2 | No (requiere configurar credenciales) |
 
-- El administrador decide en el `.env` qué métodos están **disponibles** y cuáles se **exigen** para cada grupo (8.2).
-- **Toda cuenta tiene siempre usuario/contraseña**, porque el registro pasa por ahí (RF-AUTH-01). TOTP y Google se **vinculan** después. Si el admin deshabilita Google o TOTP, los jugadores afectados vuelven a `password` sin quedar fuera.
-- Si el jugador tiene TOTP activo, ya no puede entrar solo con contraseña: usa `totp` o `password_totp`, según lo que permita el `.env`.
-- `google` sin TOTP es suficiente para jugadores normales. Los admins siempre necesitan TOTP.
-- **Nota sobre `totp`**: un código de 6 dígitos es más fácil de adivinar que una contraseña. Con bloqueo fijo, un atacante paciente tendría ≈41 % de probabilidad de acertar en un año; con el **bloqueo exponencial** de RF-AUTH-06 baja a ≈0,02 % (T-AUTH-07).
+**El 2FA (TOTP) no es un método más: refuerza a todos** (decisión del 2026-11-07). Si la cuenta lo tiene activo, después de la contraseña **o** de Google se pide el código como segundo paso, siempre. No existe entrar solo con el código. Los códigos de respaldo valen en lugar del código.
+
+- El administrador decide en el `.env` qué métodos están **disponibles** y si el 2FA se **exige** para cada grupo (8.2).
+- **Toda cuenta tiene siempre usuario/contraseña**, porque el registro pasa por ahí (RF-AUTH-01). TOTP y Google se **vinculan** después. Si el admin deshabilita Google, los jugadores afectados vuelven a `password` sin quedar fuera.
+- Con el 2FA activo, toda operación sensible de la cuenta (cambiar el correo, desvincular Google, desactivar el 2FA) pide la contraseña **y** el código.
+- `google` sin 2FA es suficiente para jugadores normales. Los admins siempre necesitan 2FA.
 
 ### 5.1 Requerimientos funcionales
 
@@ -95,7 +94,7 @@ Cada comando tiene un nodo de permiso `sam.command.<nombre>` y es configurable (
 | RF-AUTH-01f | **Nicks reservados**: el admin reserva nicks desde la consola; un nick reservado solo se registra con un código de invitación que genera el admin (RN-06). |
 | RF-AUTH-02 | Login obligatorio antes de entrar al mundo. El jugador no llega a la fase *play* hasta autenticarse. **Fail-closed**: cualquier excepción, timeout o estado inesperado durante la autenticación desconecta al jugador (RN-05). |
 | RF-AUTH-03 | **Pantalla dedicada en el cliente** (Screen propia) que se muestra durante la fase de *configuration*. Muestra la **huella visual** del certificado del servidor y, si es la primera vez que el equipo ve ese servidor y se pide login, un aviso de posible imitación (RN-42). Recuerda que SAM nunca pide la contraseña de Google dentro del juego (RN-26). |
-| RF-AUTH-04 | **2FA con TOTP** (RFC 6238): enrolamiento con un código QR en la pantalla del cliente y códigos de respaldo de un solo uso. Ventana de ±1 paso y un código ya usado no se acepta de nuevo. Es opcional para jugadores y obligatorio para administradores (5.4). |
+| RF-AUTH-04 | **2FA con TOTP** (RFC 6238): se activa desde "Opciones de cuenta" (con la contraseña) mostrando un código QR y la clave en texto, y se confirma con un primer código; se entregan 10 códigos de respaldo de un solo uso, que se muestran una sola vez. Ventana de ±1 paso y un código ya usado no se acepta de nuevo. Es un **segundo paso** después de la contraseña o de Google (5.0). Desactivarlo pide contraseña y código. Es opcional para jugadores y obligatorio para administradores (5.4). Sin `SAM_DATA_KEY` no se puede activar (RS-AUTH-03). |
 | RF-AUTH-05 | "Recordar sesión": un token ligado al UUID y a la clave de dispositivo del cliente (RS-NET-07), con TTL configurable por política. Se invalida al cambiar la contraseña o desde un comando de admin. La clave del dispositivo se guarda en el **almacén seguro del sistema operativo** (DPAPI/Credential Manager, Keychain, Secret Service), con respaldo en un archivo cifrado (RN-44). |
 | RF-AUTH-06 | **Protección contra fuerza bruta** (RN-01, RN-03): bloqueo **exponencial** (15 min, 30 min, 1 h…); el bloqueo fuerte aplica al par (cuenta, IP) y el global de la cuenta es más suave; los dispositivos de confianza quedan exentos del bloqueo global. Tras N fallos se avisa por correo (RN-02). Timeout para completar el login. |
 | RF-AUTH-06b | **Protección del login contra DoS** (RN-12): límites de logins pendientes por IP y globales; cola de Argon2 de tamaño fijo (si se llena, se rechaza la conexión); parámetros de Argon2 que acotan la RAM; verificaciones baratas antes de hashear. **Carril prioritario**: quien presenta una clave de dispositivo conocida con un token de sesión válido (una verificación Ed25519, sin Argon2) entra por una cola separada que no se satura con conexiones desconocidas. El nick o la IP solos no dan prioridad. |
@@ -130,8 +129,8 @@ TCP (o WebSocket, 6.4)
      └─ handshake → login (vanilla) → configuration:
           1. SAM_HELLO     versión de protocolo; sin SAM → kick
           2. SAM_DEVICE    el cliente prueba la posesión de su clave de dispositivo (RS-NET-07)
-          3. SAM_AUTH      AuthScreen: [contraseña] / [TOTP] / [Entrar con Google] / token de sesión
-                           + TOTP si la cuenta lo tiene activo o es admin
+          3. SAM_AUTH      AuthScreen: [contraseña] / [Entrar con Google] / token de sesión
+                           → segundo paso: código 2FA si la cuenta lo tiene activo o es admin
           4. SAM_SCRIPTS   scripts de cliente firmados + consentimiento (7.3)
           → play
 ```
@@ -346,8 +345,8 @@ SAM_NET_UNCLASSIFIED_GLOBAL=256
 SAM_RCON_SENSITIVE_COMMANDS=false           # comandos sensibles de SAM desde RCON
 
 # ===== Métodos de login disponibles =====
-# password (por defecto, el más débil) | totp | password_totp | google | discord
-SAM_AUTH_METHODS=password,password_totp,google
+# password (por defecto, el más débil) | google | discord   (el 2FA se suma a cualquiera)
+SAM_AUTH_METHODS=password,google
 SAM_AUTH_TIMEOUT=120s
 SAM_AUTH_MAX_ATTEMPTS=5
 SAM_AUTH_LOCKOUT_BASE=15m                   # se duplica en cada bloqueo repetido
@@ -390,17 +389,17 @@ SAM_POLICIES=ADMIN,STAFF,DEFAULT
 
 SAM_POLICY_ADMIN_MATCH=list:admins,op:2,permission:sam.admin
 SAM_POLICY_ADMIN_PRIORITY=100
-SAM_POLICY_ADMIN_METHODS=password_totp,google # 'totp' solo, sin contraseña, no se recomienda para admins
+SAM_POLICY_ADMIN_METHODS=password,google
 SAM_POLICY_ADMIN_REQUIRE=totp                 # factores obligatorios además del método (google + TOTP)
 SAM_POLICY_ADMIN_SESSION_TTL=12h
 
 SAM_POLICY_STAFF_MATCH=permission:sam.staff
 SAM_POLICY_STAFF_PRIORITY=50
-SAM_POLICY_STAFF_METHODS=password_totp,google
+SAM_POLICY_STAFF_METHODS=password,google
 SAM_POLICY_STAFF_REQUIRE=totp
 SAM_POLICY_STAFF_SESSION_TTL=24h
 
-SAM_POLICY_DEFAULT_METHODS=password,password_totp,google
+SAM_POLICY_DEFAULT_METHODS=password,google
 SAM_POLICY_DEFAULT_REQUIRE=                   # vacío = 2FA opcional
 SAM_POLICY_DEFAULT_SESSION_TTL=7d
 

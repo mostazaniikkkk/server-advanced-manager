@@ -369,7 +369,7 @@ Mensajes del cliente (uno por intento):
 |---|---|---|
 | `sam:register` | `k: bytes[32]`, `email: String ≤ 254` | Registro (RF-AUTH-01). `k` según la sección 6 |
 | `sam:login_password` | `k: bytes[32]`, `totp: Optional<String 6>` | `PASSWORD` o `PASSWORD_TOTP` |
-| `sam:login_totp` | `totp: String 6` | `TOTP` sin contraseña (si la política lo permite) |
+| `sam:login_totp` | `code: String ≤ 16` | **Segundo paso** tras `NEED_TOTP`: código de 6 dígitos o de respaldo (`xxxx-xxxx`). No hay login solo con TOTP; `TOTP` y `PASSWORD_TOTP` de `AuthMethod` quedan reservados |
 | `sam:oauth_start` | `provider: enum` | Inicia OAuth (5.4) |
 | `sam:recovery_request` | `email: String ≤ 254` | "¿Olvidaste tu contraseña?" |
 | `sam:recovery_complete` | `code: String ≤ 16`, `k_new: bytes[32]` | Completa la recuperación |
@@ -467,17 +467,22 @@ Primera versión de la GUI de cuenta (RF-AUTH-07d):
 ```
 C → S  sam:account_request     (vacío; al abrir "Opciones de cuenta")
 S → C  sam:account_info        email: String ≤ 254 (enmascarado, RS-AUTH-07), email_verified: bool,
-                               google: enum { UNAVAILABLE, AVAILABLE, LINKED }
-C → S  sam:account_email       k: bytes[32], email: String ≤ 254          (RF-AUTH-07b)
+                               google: enum { UNAVAILABLE, AVAILABLE, LINKED },
+                               totp: enum { UNAVAILABLE, OFF, ON }      (UNAVAILABLE: sin SAM_DATA_KEY)
+C → S  sam:account_email       k: bytes[32], code: Optional<String ≤ 16>, email: String ≤ 254   (RF-AUTH-07b)
 C → S  sam:oauth_start         provider, port                             (5.4; en play = vincular)
 S → C  sam:oauth_url           url
 C → S  sam:oauth_code          code, state
-C → S  sam:account_unlink      k: bytes[32], provider                     (RF-OAUTH-02)
+C → S  sam:account_unlink      k: bytes[32], code: Optional<String ≤ 16>, provider              (RF-OAUTH-02)
+C → S  sam:totp_begin          k: bytes[32]                                (RF-AUTH-04: activar)
+S → C  sam:totp_enroll         secret_uri: String ≤ 512 (otpauth://), backup_codes: List<String ≤ 16> = 10
+C → S  sam:totp_confirm        code: String ≤ 16                           (el primer código lo activa)
+C → S  sam:totp_disable        k: bytes[32], code: String ≤ 16
 S → C  sam:account_result      status: enum { OK, FAILED, LOCKED }, detail: Optional<String ≤ 128>
                                (después de cada operación llega un account_info nuevo)
 ```
 
-Los fallos de contraseña en play cuentan para el mismo tope que en el login (SAM-K004).
+Con el 2FA activo, `account_email`, `account_unlink` y `totp_disable` exigen el código además de `k`. Los fallos de contraseña o de código en play cuentan para el mismo tope que en el login (SAM-K004).
 | `sam:lua_msg` | ambos | Canal de un script: `script_id`, `channel: String ≤ 32`, `data: bytes ≤ 4 KiB` |
 | `sam:notice` | S → C | Avisos (actualización disponible para admins, alerta del trust store) |
 
