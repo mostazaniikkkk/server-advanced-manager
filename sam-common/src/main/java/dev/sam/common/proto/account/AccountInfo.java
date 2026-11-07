@@ -13,6 +13,9 @@ public record AccountInfo(String email, boolean emailVerified, Google google, To
 
     static final int MAX_EMAIL = 254;
 
+    /** El código de la app o de respaldo (PROTOCOLO.md 5.3/5.7). */
+    static final int MAX_CODE = 16;
+
     /** Google en esta cuenta: el servidor no lo tiene configurado, se puede vincular o ya está vinculado. */
     public enum Google {
         UNAVAILABLE, AVAILABLE, LINKED

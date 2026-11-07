@@ -58,25 +58,57 @@ class AccountMessagesTest {
     }
 
     @Test
-    void elCambioDeCorreoLlevaKYElCorreoNuevo() {
-        var cambio = new AccountEmail(k(4), "nuevo@example.com");
-        var bytes = escribir(cambio::write);
-        assertThat(Arrays.copyOfRange(bytes, 0, 32)).isEqualTo(k(4));
-        assertThat(leer(bytes, AccountEmail.MAX_BYTES, AccountEmail::read)).usingRecursiveComparison().isEqualTo(cambio);
-        malFormado(w -> w.fixed(k(1), 32).string("a".repeat(255), 255), AccountEmail::read, "largo 255 fuera de 0..254");
+    void elCambioDeCorreoLlevaKElCodigoOpcionalYElCorreoNuevo() {
+        for (var cambio : List.of(new AccountEmail(k(4), Optional.empty(), "nuevo@example.com"),
+                new AccountEmail(k(4), Optional.of("123456"), "nuevo@example.com"))) {
+            var bytes = escribir(cambio::write);
+            assertThat(Arrays.copyOfRange(bytes, 0, 32)).isEqualTo(k(4));
+            assertThat(leer(bytes, AccountEmail.MAX_BYTES, AccountEmail::read)).usingRecursiveComparison().isEqualTo(cambio);
+        }
+        malFormado(w -> w.fixed(k(1), 32).optional(Optional.empty(), (x, c) -> { }).string("a".repeat(255), 255), AccountEmail::read,
+            "largo 255 fuera de 0..254");
+        malFormado(w -> w.fixed(k(1), 32).optional(Optional.of("1".repeat(17)), (x, c) -> x.string(c, 17)), AccountEmail::read,
+            "largo 17 fuera de 0..16");
         malFormado(w -> w.fixed(new byte[31], 31), AccountEmail::read, "mensaje incompleto");
-        assertThatThrownBy(() -> new AccountEmail(new byte[31], "a@b.c")).isInstanceOf(IllegalArgumentException.class)
+        assertThatThrownBy(() -> new AccountEmail(new byte[31], Optional.empty(), "a@b.c")).isInstanceOf(IllegalArgumentException.class)
             .hasMessage("k debe tener 32 bytes");
     }
 
     @Test
     void desvincularLlevaKYElProveedor() {
-        var desvincular = new AccountUnlink(k(5), OAuthProvider.GOOGLE);
+        var desvincular = new AccountUnlink(k(5), Optional.of("abcd-efgh"), OAuthProvider.GOOGLE);
         assertThat(leer(escribir(desvincular::write), AccountUnlink.MAX_BYTES, AccountUnlink::read)).usingRecursiveComparison()
             .isEqualTo(desvincular);
-        assertThat(escribir(desvincular::write)).hasSize(33);
-        malFormado(w -> w.fixed(k(1), 32).varInt(2), AccountUnlink::read, "valor 2 fuera de rango para OAuthProvider");
-        assertThatThrownBy(() -> new AccountUnlink(new byte[0], OAuthProvider.GOOGLE)).isInstanceOf(IllegalArgumentException.class)
+        assertThat(escribir(new AccountUnlink(k(5), Optional.empty(), OAuthProvider.GOOGLE)::write)).hasSize(34);
+        malFormado(w -> w.fixed(k(1), 32).optional(Optional.empty(), (x, c) -> { }).varInt(2), AccountUnlink::read,
+            "valor 2 fuera de rango para OAuthProvider");
+        assertThatThrownBy(() -> new AccountUnlink(new byte[0], Optional.empty(), OAuthProvider.GOOGLE))
+            .isInstanceOf(IllegalArgumentException.class).hasMessage("k debe tener 32 bytes");
+    }
+
+    @Test
+    void losMensajesDelDosFAVanYVuelvenConSusLimites() {
+        var inicio = new TotpBegin(k(6));
+        assertThat(leer(escribir(inicio::write), TotpBegin.MAX_BYTES, TotpBegin::read)).usingRecursiveComparison().isEqualTo(inicio);
+        assertThatThrownBy(() -> new TotpBegin(new byte[3])).isInstanceOf(IllegalArgumentException.class).hasMessage("k debe tener 32 bytes");
+
+        var codigos = java.util.Collections.nCopies(10, "abcd-efgh");
+        var enrolamiento = new TotpEnroll("otpauth://totp/S:Steve?secret=ABC", codigos);
+        assertThat(leer(escribir(enrolamiento::write), 4096, TotpEnroll::read)).isEqualTo(enrolamiento);
+        malFormado(w -> w.string("x".repeat(513), 513), TotpEnroll::read, "largo 513 fuera de 0..512");
+        malFormado(w -> w.string("otpauth://x", 512).list(java.util.Collections.nCopies(11, "c"), 11, (x, c) -> x.string(c, 16)),
+            TotpEnroll::read, "largo 11 fuera de 0..10");
+        malFormado(w -> w.string("https://evil", 512).list(List.of(), 10, (x, c) -> { }), TotpEnroll::read,
+            "la URI del 2FA debe ser otpauth://totp/");
+
+        var confirmar = new TotpConfirm("123456");
+        assertThat(leer(escribir(confirmar::write), TotpConfirm.MAX_BYTES, TotpConfirm::read)).isEqualTo(confirmar);
+        malFormado(w -> w.string("1".repeat(17), 17), TotpConfirm::read, "largo 17 fuera de 0..16");
+
+        var desactivar = new TotpDisable(k(8), "654321");
+        assertThat(leer(escribir(desactivar::write), TotpDisable.MAX_BYTES, TotpDisable::read)).usingRecursiveComparison()
+            .isEqualTo(desactivar);
+        assertThatThrownBy(() -> new TotpDisable(new byte[1], "1")).isInstanceOf(IllegalArgumentException.class)
             .hasMessage("k debe tener 32 bytes");
     }
 
