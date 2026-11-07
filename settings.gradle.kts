@@ -10,4 +10,4 @@ pluginManagement {
 
 rootProject.name = "server-advanced-manager"
 
-include("sam-common", "sam-server", "sam-client")
+include("sam-common", "sam-server", "sam-client", "sam-signer")

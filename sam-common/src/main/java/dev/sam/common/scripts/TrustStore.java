@@ -48,7 +48,7 @@ public record TrustStore(List<SigningPublicKey> active, List<Pending> pending, L
         }
         for (var file : files) {
             var name = file.getFileName().toString();
-            var key = parse(Files.readString(file));
+            var key = parsePublic(Files.readString(file));
             if (key.isEmpty()) {
                 problems.add(name + ": no es una clave pública Ed25519 en base64");
             } else if (confirmed.contains(key.get().keyId().hex())) {
@@ -80,7 +80,8 @@ public record TrustStore(List<SigningPublicKey> active, List<Pending> pending, L
         return lines.stream().map(String::strip).collect(Collectors.toSet());
     }
 
-    private static Optional<SigningPublicKey> parse(String content) {
+    /** El contenido de un {@code .pub}: la primera línea que no es comentario, en base64 (también lo usa sam-signer). */
+    public static Optional<SigningPublicKey> parsePublic(String content) {
         var line = content.lines().map(String::strip).filter(l -> !l.isEmpty() && !l.startsWith("#")).findFirst().orElse("");
         try {
             return Optional.of(SigningPublicKey.of(Base64.getDecoder().decode(line)));

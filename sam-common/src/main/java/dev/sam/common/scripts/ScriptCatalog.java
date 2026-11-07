@@ -69,13 +69,13 @@ public final class ScriptCatalog {
             var unsignedServer = invalid.reason() == ScriptVerifier.Reason.MISSING_SIGNATURE && devMode
                 && manifest.side() == ScriptManifest.Side.SERVER;
             if (!unsignedServer) {
-                throw new IllegalArgumentException(reason(invalid.reason()));
+                throw new IllegalArgumentException(describe(invalid.reason()));
             }
             // Las rutas se validan igual que en un script firmado
             try {
                 Lockfile.of(files);
             } catch (IllegalArgumentException e) {
-                throw new IllegalArgumentException(reason(ScriptVerifier.Reason.INVALID_FILES));
+                throw new IllegalArgumentException(describe(ScriptVerifier.Reason.INVALID_FILES));
             }
             warnings.add("El script " + id + " no está firmado: solo corre porque el modo desarrollo está activo");
         }
@@ -91,7 +91,8 @@ public final class ScriptCatalog {
         return java.util.Optional.of(new ScriptHost.Package(manifest, sources));
     }
 
-    private static String reason(ScriptVerifier.Reason reason) {
+    /** El motivo de un rechazo de firma, para el operador (también lo usa sam-signer). */
+    public static String describe(ScriptVerifier.Reason reason) {
         return switch (reason) {
             case MISSING_SIGNATURE -> "no está firmado";
             case MALFORMED_SIGNATURE -> "signature.json está mal formado";
