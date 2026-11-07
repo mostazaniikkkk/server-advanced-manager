@@ -72,3 +72,21 @@ Para revocar una clave, borra su `.pub`.
 ## 5. Modo desarrollo
 
 `SAM_SCRIPTS_DEV_MODE=true` (variable de entorno) permite scripts **sin firma**, solo del lado servidor, con un aviso en el log. Úsalo solo mientras escribes un script; nunca en producción.
+
+## 6. Scripts de cliente
+
+Un script con `"side": "client"` (o `"both"`) **no corre en el servidor**: se envía a cada jugador al entrar, después del login. El jugador ve una pantalla con cada script, quién lo firmó (el nombre de su `.pub`) y qué capacidades pide, y elige cuáles acepta. Lo aceptado corre solo mientras está conectado a tu servidor.
+
+- Siempre van **firmados**: el modo desarrollo nunca envía scripts sin firma a los clientes.
+- El cliente comprueba dos firmas: la de tu clave sobre el script, y la del servidor sobre la lista de claves que autorizas (la identidad del servidor, que el jugador ya tiene fijada). Un script que no pasa no se puede aceptar.
+- `"required": true` marca los imprescindibles. Qué pasa si el jugador rechaza algo lo decide `SAM_SCRIPTS_CLIENT_ON_REJECT`:
+
+| Valor | Si rechaza… |
+|---|---|
+| `per_script` (por defecto) | un script requerido: se le expulsa con `SAM-K010`. Los opcionales puede rechazarlos. |
+| `kick` | cualquier script: se le expulsa. |
+| `allow` | lo que sea: entra sin esos scripts. |
+
+Un cliente de SAM sin soporte de scripts cuenta como si los rechazara todos. El jugador puede rechazarlos siempre con `enabled=false` en `config/sam-client/scripts.properties`.
+
+Topes por conexión: 128 scripts y 16 MiB en total (4 MiB por script). El cliente guarda cada script en `sam-client/script-cache/` por su hash y lo vuelve a verificar cada vez que lo usa: si cambias el script, se descarga de nuevo.

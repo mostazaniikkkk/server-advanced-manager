@@ -25,6 +25,8 @@ public final class SamClient implements ClientModInitializer {
         LOGGER.info("SAM Client {} cargado. Núcleo: {}", version, coreSmokeCheck());
         SamClientNet.init(FabricLoader.getInstance().getConfigDir().resolve("sam-client/pins.json"), LOGGER);
         SamClientAuth.install(LOGGER, version);
+        dev.sam.client.scripts.SamClientScripts.install(LOGGER, FabricLoader.getInstance().getGameDir().resolve("sam-client/script-cache"),
+            FabricLoader.getInstance().getConfigDir().resolve("sam-client/scripts.properties"));
         dev.sam.client.account.SamClientAccount.install(LOGGER);
         dev.sam.client.account.SamClientAccount.devHook();
         devQuitAfterJoin();

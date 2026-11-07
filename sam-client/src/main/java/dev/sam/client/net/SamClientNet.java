@@ -100,6 +100,8 @@ public final class SamClientNet {
     /** El server_id verificado de la última conexión TLS: el hello del servidor debe coincidir. */
     private static volatile ServerId lastVerified;
     private static volatile String lastFingerprint;
+    /** La clave verificada (fijada) de la última conexión: verifica la keylist de los scripts (RS-SIG-05). */
+    private static volatile dev.sam.common.identity.ServerPublicKey lastVerifiedKey;
 
     private SamClientNet() {
     }
@@ -232,6 +234,10 @@ public final class SamClientNet {
         return Optional.ofNullable(lastVerified);
     }
 
+    public static Optional<dev.sam.common.identity.ServerPublicKey> lastVerifiedKey() {
+        return Optional.ofNullable(lastVerifiedKey);
+    }
+
     /** La huella en palabras del último servidor verificado (PROTOCOLO.md 3.5). */
     public static Optional<String> lastFingerprint() {
         return Optional.ofNullable(lastFingerprint);
@@ -267,6 +273,7 @@ public final class SamClientNet {
             }
         }
         lastVerified = server.serverId();
+        lastVerifiedKey = server.publicKey();
         lastFingerprint = fingerprint;
         return Optional.empty();
     }

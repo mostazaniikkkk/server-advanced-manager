@@ -79,12 +79,13 @@ final class ClientScriptsDelivery {
         PayloadTypeRegistry.configurationC2S().register(CONSENT, SamPayload.codec(CONSENT, ScriptsConsent.MAX_BYTES));
         ServerConfigurationConnectionEvents.CONFIGURE.register(this::configure);
         ServerConfigurationConnectionEvents.DISCONNECT.register((handler, server) -> sessions.remove(handler));
-        ServerConfigurationNetworking.registerGlobalReceiver(WANT, (payload, context) ->
+        // Los receptores de configuration corren en el hilo de red: todo se atiende en el del servidor
+        ServerConfigurationNetworking.registerGlobalReceiver(WANT, (payload, context) -> context.server().execute(() ->
             receive(context.networkHandler(), payload, ScriptsWant.MAX_BYTES, ScriptsWant::read, (handler, session, want) ->
                 session.onWant(want).forEach(chunk -> ServerConfigurationNetworking.send(handler,
-                    new SamPayload(CHUNK, encode(chunk::write))))));
-        ServerConfigurationNetworking.registerGlobalReceiver(CONSENT, (payload, context) ->
-            receive(context.networkHandler(), payload, ScriptsConsent.MAX_BYTES, ScriptsConsent::read, this::consent));
+                    new SamPayload(CHUNK, encode(chunk::write)))))));
+        ServerConfigurationNetworking.registerGlobalReceiver(CONSENT, (payload, context) -> context.server().execute(() ->
+            receive(context.networkHandler(), payload, ScriptsConsent.MAX_BYTES, ScriptsConsent::read, this::consent)));
     }
 
     /** La clave de la identidad del servidor: firma la keylist (RS-SIG-05). */
