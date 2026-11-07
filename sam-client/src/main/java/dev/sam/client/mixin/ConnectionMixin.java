@@ -116,6 +116,18 @@ public abstract class ConnectionMixin implements SamTlsConnection {
         sam$explain(ctx.channel(), null);
     }
 
+    /**
+     * Al cerrar, el canal deja de estar abierto en el acto, pero channelInactive llega después por el event
+     * loop: el hilo del juego puede ver la conexión caída y mostrar "Disconnected" antes. El motivo se pone
+     * también aquí, justo antes de que vanilla lo lea.
+     */
+    @Inject(method = "handleDisconnection", at = @At("HEAD"))
+    private void sam$explainBeforeShowing(CallbackInfo ci) {
+        if (channel != null) {
+            sam$explain(channel, null);
+        }
+    }
+
     @Unique
     private void sam$explain(Channel closed, String fallback) {
         if (disconnectionDetails != null) {
