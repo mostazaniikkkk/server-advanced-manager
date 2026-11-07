@@ -4,7 +4,7 @@ plugins {
 
 allprojects {
     group = "dev.sam"
-    version = "0.1.0-SNAPSHOT"
+    version = "0.1.1"
 }
 
 // Detección de cuelgues: una tarea trabada falla sola en lugar de bloquear el build sin aviso.
