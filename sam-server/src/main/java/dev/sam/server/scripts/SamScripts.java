@@ -57,6 +57,11 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
     private final boolean devMode;
     private final ScriptHost host;
     private final ClientScriptsDelivery delivery;
+    /** El tope de mensajes por jugador y script ({@code nick/script}). */
+    private final Map<String, dev.sam.common.lua.MessageBudget> budgets = new HashMap<>();
+    private final Map<String, Integer> warned = new HashMap<>();
+    static final net.minecraft.network.protocol.common.custom.CustomPacketPayload.Type<dev.sam.server.auth.SamPayload> LUA_MSG =
+        dev.sam.server.auth.SamPayload.type(dev.sam.common.proto.scripts.LuaMessage.ID);
     private volatile MinecraftServer server;
     private Map<String, Map<String, byte[]>> folders = Map.of();
     /** Los comandos que SAM agregó al dispatcher actual (al recrearse con /reload, se empieza de cero). */
@@ -102,6 +107,7 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
         }
         var scripts = new SamScripts(log, keys, devMode, limits, onReject);
         scripts.delivery.install();
+        scripts.installMessages();
         ResourceManagerHelper.get(PackType.SERVER_DATA).registerReloadListener(scripts);
         ServerLifecycleEvents.SERVER_STARTING.register(s -> scripts.server = s);
         // Los comandos de los scripts entran al árbol cuando existe: al terminar de arrancar y tras cada /reload
@@ -113,8 +119,14 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
         // y DISCONNECT puede llegar desde un hilo de red. Lua solo corre en el hilo del servidor.
         ServerPlayConnectionEvents.JOIN.register((handler, sender, s) ->
             scripts.later(s, ScriptHost.Event.JOIN, player(handler.getPlayer()), Optional.empty()));
-        ServerPlayConnectionEvents.DISCONNECT.register((handler, s) ->
-            scripts.later(s, ScriptHost.Event.QUIT, player(handler.getPlayer()), Optional.empty()));
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, s) -> {
+            scripts.later(s, ScriptHost.Event.QUIT, player(handler.getPlayer()), Optional.empty());
+            var nick = handler.getPlayer().getGameProfile().getName();
+            s.execute(() -> {
+                scripts.delivery.forget(nick);
+                scripts.budgets.keySet().removeIf(key -> key.startsWith(nick + "/"));
+            });
+        });
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) ->
             scripts.later(sender.server, ScriptHost.Event.CHAT, player(sender), Optional.of(message.signedContent())));
         CommandRegistrationCallback.EVENT.register((dispatcher, registry, environment) -> dispatcher.register(Commands.literal("sam")
@@ -128,6 +140,42 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
                     .then(Commands.literal("confirm").then(Commands.argument("key_id", StringArgumentType.word())
                         .executes(c -> scripts.trustConfirm(c.getSource(), StringArgumentType.getString(c, "key_id")))))))));
         return Optional.of(scripts);
+    }
+
+    /** {@code sam:lua_msg} (PROTOCOLO.md 5.7): entre la parte de cliente y la de servidor de un mismo script. */
+    private void installMessages() {
+        net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry.playC2S().register(LUA_MSG,
+            dev.sam.server.auth.SamPayload.codec(LUA_MSG, dev.sam.common.proto.scripts.LuaMessage.MAX_BYTES));
+        net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry.playS2C().register(LUA_MSG,
+            dev.sam.server.auth.SamPayload.codec(LUA_MSG, dev.sam.common.proto.scripts.LuaMessage.MAX_BYTES));
+        net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(LUA_MSG, (payload, context) -> {
+            var sender = context.player();
+            sender.server.execute(() -> onMessage(sender, payload));
+        });
+    }
+
+    private void onMessage(ServerPlayer sender, dev.sam.server.auth.SamPayload payload) {
+        var nick = sender.getGameProfile().getName();
+        try {
+            var message = dev.sam.common.proto.SamReader.decode(io.netty.buffer.Unpooled.wrappedBuffer(payload.data()),
+                dev.sam.common.proto.scripts.LuaMessage.MAX_BYTES, dev.sam.common.proto.scripts.LuaMessage::read);
+            if (!delivery.accepted(nick, message.script())) {
+                return;
+            }
+            var tick = sender.server.getTickCount();
+            if (!budgets.computeIfAbsent(nick + "/" + message.script(), k -> new dev.sam.common.lua.MessageBudget()).take(tick)) {
+                // Un aviso por segundo como mucho
+                if (tick - warned.getOrDefault(nick, -20) >= 20) {
+                    warned.put(nick, tick);
+                    log.warn("{} superó el tope de mensajes del script {}: se descartan", nick, message.script());
+                }
+                return;
+            }
+            host.deliver(message.script(), Optional.of(player(sender)), message.channel(), message.data());
+        } catch (dev.sam.common.proto.ProtocolException e) {
+            log.warn("[auditoría] Error de protocolo de {}: {} ({})", nick, e.code(), e.getMessage());
+            sender.connection.disconnect(Component.literal("Error de protocolo. [" + e.code() + "]"));
+        }
     }
 
     /** Encola el evento para el próximo tick del hilo del servidor (nunca corre en el acto ni en otro hilo). */
@@ -384,6 +432,21 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
         @Override
         public void log(String script, String text) {
             log.info("[script {}] {}", script, text);
+        }
+
+        @Override
+        public boolean send(String script, String player, String channel, byte[] data) {
+            var current = server;
+            var target = current == null ? null : current.getPlayerList().getPlayerByName(player);
+            if (target == null || !delivery.accepted(target.getGameProfile().getName(), script)
+                    || !net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.canSend(target, LUA_MSG)) {
+                return false;
+            }
+            var buf = io.netty.buffer.Unpooled.buffer();
+            new dev.sam.common.proto.scripts.LuaMessage(script, channel, data).write(new dev.sam.common.proto.SamWriter(buf));
+            net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(target,
+                new dev.sam.server.auth.SamPayload(LUA_MSG, io.netty.buffer.ByteBufUtil.getBytes(buf)));
+            return true;
         }
     }
 }

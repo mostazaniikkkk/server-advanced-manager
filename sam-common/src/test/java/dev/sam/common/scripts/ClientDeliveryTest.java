@@ -62,6 +62,7 @@ class ClientDeliveryTest {
         files.put("manifest.json", ("{\"id\":\"" + id + "\",\"version\":\"1.0\",\"side\":\"" + side
             + "\",\"capabilities\":[\"hud\"],\"required\":true}").getBytes(StandardCharsets.UTF_8));
         files.put("main.lua", main.getBytes(StandardCharsets.UTF_8));
+        files.put("assets/icono.png", new byte[] {(byte) 0x89, 'P', 'N', 'G'});
         files.put("signature.json", ScriptSigner.sign(files, clave));
         return files;
     }
@@ -101,6 +102,8 @@ class ClientDeliveryTest {
         assertThat(listo.signer()).isEqualTo("operador");
         assertThat(listo.script().manifest().capabilities()).containsExactly("hud");
         assertThat(listo.script().sources()).containsEntry("main.lua", "sam.log('ñandú')");
+        // Las imágenes del script viajan con él (RF-LUA-08); se validan al usarlas (RN-29)
+        assertThat(listo.script().assets()).containsOnlyKeys("assets/icono.png");
         assertThat(cache.read(HexFormat.of().formatHex(ScriptPackage.sha256(hud)))).contains(hud);
         // La próxima conexión no pide nada: sale de la caché, verificado de nuevo
         var otra = ClientDelivery.open(new ScriptsOffer(keylist(servidor, AJENA, OPERADOR), List.of(ref("hud", hud))), fijada(), cache);

@@ -1,6 +1,7 @@
 package dev.sam.common.lua;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -143,5 +144,150 @@ class ClientScriptHostTest {
         assertThat(host.hud()).extracting(ScriptHost.HudText::text).containsExactly("2");
         host.load(List.of());
         assertThat(host.hud()).isEmpty();
+    }
+
+    // ===== messages: las dos partes de un mismo script (PROTOCOLO.md 5.7 y 8.3) =====
+
+    private record Enviado(String script, String jugador, String canal, String datos) {
+    }
+
+    private static String datos(byte[] bytes) {
+        return java.util.HexFormat.of().formatHex(bytes);
+    }
+
+    @Test
+    void elClienteEnviaYRecibePorCanal() throws Exception {
+        var enviados = new ArrayList<Enviado>();
+        var cliente = ScriptHost.client(new ScriptHost.ClientBridge() {
+            @Override
+            public void log(String s, String text) {
+                log.add(s + ": " + text);
+            }
+
+            @Override
+            public void send(String s, String canal, byte[] bytes) {
+                enviados.add(new Enviado(s, null, canal, datos(bytes)));
+            }
+        }, LIMITES);
+        cliente.load(List.of(script("panel", """
+            sam.send("hola", true)
+            local primero = sam.receive("vida", function(d) sam.log("vida " .. d.valor) end)
+            local segundo = sam.receive("vida", function(d) sam.log("vida nueva " .. d.valor) end)
+            sam.log(tostring(primero) .. "," .. tostring(segundo) .. "," .. tostring(sam.send("x", nil)))
+            """, "messages"), script("sin", "sam.log(type(sam.send))")));
+        assertThat(log).containsExactly("panel: false,true,nil", "sin: nil");
+        assertThat(enviados).containsExactly(new Enviado("panel", null, "hola", "02"), new Enviado("panel", null, "x", "00"));
+        var tabla = new org.squiddev.cobalt.LuaTable();
+        tabla.rawset("valor", org.squiddev.cobalt.ValueFactory.valueOf(7));
+        assertThat(cliente.deliver("panel", java.util.Optional.empty(), "vida", LuaData.encode(tabla))).isTrue();
+        assertThat(log).last().isEqualTo("panel: vida nueva 7");
+        assertThat(cliente.deliver("panel", java.util.Optional.empty(), "otro", new byte[] {0})).isFalse();
+        assertThat(cliente.deliver("sin", java.util.Optional.empty(), "vida", new byte[] {0})).isFalse();
+        assertThat(cliente.deliver("nadie", java.util.Optional.empty(), "vida", new byte[] {0})).isFalse();
+        // Un script suspendido no recibe
+        cliente.load(List.of(script("lento", "sam.receive('c', function() while true do end end)", "messages")));
+        assertThat(cliente.deliver("lento", java.util.Optional.empty(), "c", new byte[] {0})).isTrue();
+        assertThat(cliente.status().getFirst().state()).isEqualTo(ScriptHost.State.SUSPENDED);
+        assertThat(cliente.deliver("lento", java.util.Optional.empty(), "c", new byte[] {0})).isFalse();
+        cliente.load(List.of(script("panel", "sam.receive('vida', function() end)", "messages")));
+        assertThatThrownBy(() -> cliente.deliver("panel", java.util.Optional.empty(), "vida", new byte[] {9}))
+            .isInstanceOf(dev.sam.common.proto.ProtocolException.class);
+    }
+
+    @Test
+    void loQueNoSePuedeEnviarEsUnErrorDelScript() {
+        var cliente = ScriptHost.client((s, text) -> log.add(text), LIMITES);
+        var casos = Map.of(
+            "sam.send('Mal', 1)", "canal inválido \"Mal\": [a-z0-9_], hasta 32",
+            "sam.send('c', function() end)", "no se puede enviar un valor de tipo function",
+            "sam.receive('Mal', function() end)", "canal inválido",
+            "for i = 1, 33 do sam.send('c', i) end", "como mucho 32 mensajes por tick");
+        for (var caso : casos.entrySet()) {
+            cliente.load(List.of(script("s", caso.getKey(), "messages")));
+            assertThat(cliente.status().getFirst().state()).as(caso.getKey()).isEqualTo(ScriptHost.State.FAILED);
+            assertThat(cliente.status().getFirst().errors().getFirst()).as(caso.getKey()).contains(caso.getValue());
+        }
+        // 32 por tick valen, y el contador vuelve a cero en cada tick
+        cliente.load(List.of(script("s", "for i = 1, 32 do sam.send('c', i) end sam.every(1, function() for i = 1, 32 do sam.send('c', i) end end)",
+            "messages", "scheduler")));
+        cliente.tick();
+        cliente.tick();
+        assertThat(cliente.status().getFirst().state()).isEqualTo(ScriptHost.State.RUNNING);
+        assertThat(cliente.status().getFirst().errors()).isEmpty();
+    }
+
+    private ScriptHost servidor(List<Enviado> enviados) {
+        return new ScriptHost(new ScriptHost.Bridge() {
+            @Override
+            public List<ScriptHost.Player> players() {
+                return List.of();
+            }
+
+            @Override
+            public void tell(String player, String text) {
+            }
+
+            @Override
+            public void broadcast(String text) {
+            }
+
+            @Override
+            public void log(String s, String text) {
+                log.add(text);
+            }
+
+            @Override
+            public boolean send(String s, String player, String channel, byte[] data) {
+                enviados.add(new Enviado(s, player, channel, datos(data)));
+                return player.equals("Steve");
+            }
+        }, LIMITES);
+    }
+
+    @Test
+    void elServidorEnviaAUnJugadorYSabeQuienLeEscribio() throws Exception {
+        var enviados = new ArrayList<Enviado>();
+        var servidor = servidor(enviados);
+        servidor.load(List.of(new ScriptHost.Package(new ScriptManifest("panel", "1", ScriptManifest.Side.BOTH, List.of(),
+            List.of("messages"), false), Map.of("main.lua", """
+                sam.log(tostring(sam.send("Steve", "abrir", {1, 2})) .. "," .. tostring(sam.send("Alex", "abrir", false)))
+                sam.receive("clic", function(jugador, d) sam.log(jugador.name .. " " .. jugador.uuid .. " " .. d) end)
+                """))));
+        assertThat(log).containsExactly("true,false");
+        assertThat(enviados).extracting(Enviado::jugador).containsExactly("Steve", "Alex");
+        assertThat(enviados.getFirst().datos()).isEqualTo(datos(LuaData.encode(tablaDe(1, 2))));
+        var steve = new ScriptHost.Player("Steve", "8667ba71-b85a-4004-af54-457a9734eed7");
+        assertThat(servidor.deliver("panel", java.util.Optional.of(steve), "clic", LuaData.encode(LuaSandbox.lua("ok")))).isTrue();
+        assertThat(log).last().isEqualTo("Steve 8667ba71-b85a-4004-af54-457a9734eed7 ok");
+        // Con el Bridge por defecto (sin mensajería), sam.send devuelve false
+        var mudo = new ScriptHost(new ScriptHost.Bridge() {
+            @Override
+            public List<ScriptHost.Player> players() {
+                return List.of();
+            }
+
+            @Override
+            public void tell(String player, String text) {
+            }
+
+            @Override
+            public void broadcast(String text) {
+            }
+
+            @Override
+            public void log(String s, String text) {
+                log.add(text);
+            }
+        }, LIMITES);
+        mudo.load(List.of(script("m", "sam.log('mudo ' .. tostring(sam.send('Steve', 'c', 1)))", "messages")));
+        assertThat(log).last().isEqualTo("mudo false");
+    }
+
+    private static org.squiddev.cobalt.LuaTable tablaDe(double... valores) {
+        var tabla = new org.squiddev.cobalt.LuaTable();
+        for (var i = 0; i < valores.length; i++) {
+            tabla.rawset(i + 1, org.squiddev.cobalt.ValueFactory.valueOf(valores[i]));
+        }
+        return tabla;
     }
 }

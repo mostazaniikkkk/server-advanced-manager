@@ -39,6 +39,20 @@ public final class ScriptHost {
     private static final java.util.regex.Pattern COMMAND = java.util.regex.Pattern.compile("[a-z][a-z0-9_]{0,31}");
     private static final int MAX_LOG = 512;
     static final int MAX_HUD = 64;
+    static final int MAX_SENT = 32;
+    private static final int MAX_IMAGE = 512;
+    private static final int MAX_KEYS = 8;
+    private static final int MAX_TITLE = 64;
+    private static final int MAX_SHORT = 64;
+    private static final int MAX_WIDGETS = 64;
+    private static final int MIN_WIDTH = 64;
+    private static final int MAX_WIDTH = 400;
+    private static final int MIN_HEIGHT = 32;
+    private static final int MAX_HEIGHT = 300;
+    private static final java.util.regex.Pattern KEY = java.util.regex.Pattern.compile("[a-z0-9]|f[1-9]|f1[0-2]");
+    /** Los títulos de las pantallas de SAM (RS-LUA-07): un script no puede imitarlos. */
+    private static final java.util.Set<String> PROTECTED_TITLES = java.util.Set.of("crear cuenta", "iniciar sesión",
+        "scripts del servidor", "opciones de cuenta", "activar 2fa");
     private static final int MAX_OFFSET = 4096;
     private static final java.util.regex.Pattern HUD_ID = java.util.regex.Pattern.compile("[a-z0-9_]{1,32}");
     private static final int MAX_ERRORS = 20;
@@ -56,8 +70,105 @@ public final class ScriptHost {
     public record HudText(String script, String id, String text, Anchor anchor, int x, int y, int color) {
     }
 
+    /** Los textos del HUD de los scripts que están corriendo, en orden de carga y de creación. */
+    public synchronized List<HudText> hud() {
+        return scripts.values().stream().filter(l -> l.state == State.RUNNING).flatMap(l -> l.hud.values().stream())
+            .filter(HudText.class::isInstance).map(HudText.class::cast).toList();
+    }
+
+    /** Un jugador como lo ve Lua: solo copias de valores, nunca objetos de Minecraft (RS-LUA-02c). */
+    public record Player(String name, String uuid) {
+    }
+
+    /** Lo que los scripts pueden pedirle al servidor. */
+    public interface Bridge {
+        List<Player> players();
+
+        void tell(String player, String text);
+
+        void broadcast(String text);
+
+        void log(String script, String text);
+
+        /**
+         * Envía un mensaje a la parte de cliente del script en el juego de un jugador ({@code sam:lua_msg}).
+         *
+         * @return si el jugador está en línea y aceptó el script
+         */
+        default boolean send(String script, String player, String channel, byte[] data) {
+            return false;
+        }
+    }
+
+    /**
+     * Entrega un mensaje que llegó por {@code sam:lua_msg} al {@code sam.receive} de ese canal.
+     *
+     * @param from quien lo envió (en el servidor), vacío en el cliente
+     * @return si había un script corriendo que lo esperaba
+     * @throws dev.sam.common.proto.ProtocolException si los datos no son un {@code LuaData} válido
+     */
+    public synchronized boolean deliver(String script, Optional<Player> from, String channel, byte[] data) {
+        var loaded = scripts.get(script);
+        if (loaded == null || loaded.state != State.RUNNING) {
+            return false;
+        }
+        var receiver = loaded.receivers.get(channel);
+        if (receiver == null) {
+            return false;
+        }
+        var value = LuaData.decode(data);
+        run(loaded, () -> from.isPresent() ? loaded.script.invoke(receiver, playerTable(from.get()), value)
+            : loaded.script.invoke(receiver, value));
+        return true;
+    }
+
+    /** Un script ya verificado (firma o modo desarrollo): su manifest y sus fuentes. */
+    public record Package(ScriptManifest manifest, Map<String, String> sources, Map<String, byte[]> assets) {
+
+        public Package(ScriptManifest manifest, Map<String, String> sources) {
+            this(manifest, sources, Map.of());
+        }
+    }
+
+    /** Lo que los scripts del cliente le piden al juego. */
+    public interface ClientBridge {
+        void log(String script, String text);
+
+        /** {@code sam:lua_msg} hacia la parte de servidor del script. */
+        default void send(String script, String channel, byte[] data) {
+        }
+
+        /** @return si se abrió (nunca sobre una pantalla de SAM ni de vanilla) */
+        default boolean openScreen(String script, ScreenSpec spec) {
+            return false;
+        }
+
+        /** Cierra la pantalla de ese script, si es la que está abierta. @return si lo era */
+        default boolean closeScreen(String script) {
+            return false;
+        }
+
+        /** @return si la tecla quedó asignada (el jugador la puede cambiar; no se pisa una acción del juego) */
+        default boolean bindKey(String script, String id, String key) {
+            return false;
+        }
+    }
+
+    /** Una imagen del HUD de un script: los bytes ya pasaron {@link PngInfo#check}. */
+    public record HudImage(String script, String id, String path, byte[] png, Anchor anchor, int x, int y, int w, int h) {
+
+        public HudImage {
+            png = png.clone();
+        }
+
+        @Override
+        public byte[] png() {
+            return png.clone();
+        }
+    }
+
     /** El host del cliente: solo las capacidades del cliente (API de cliente v0, PROTOCOLO.md 8.3). */
-    public static ScriptHost client(java.util.function.BiConsumer<String, String> log, ScriptLimits limits) {
+    public static ScriptHost client(ClientBridge bridge, ScriptLimits limits) {
         return new ScriptHost(new Bridge() {
             @Override
             public List<Player> players() {
@@ -76,33 +187,47 @@ public final class ScriptHost {
 
             @Override
             public void log(String script, String text) {
-                log.accept(script, text);
+                bridge.log(script, text);
             }
-        }, limits, true);
+        }, limits, bridge);
     }
 
-    /** Los textos del HUD de los scripts que están corriendo, en orden de carga y de creación. */
-    public synchronized List<HudText> hud() {
-        return scripts.values().stream().filter(l -> l.state == State.RUNNING).flatMap(l -> l.hud.values().stream()).toList();
+    /** Un evento de la pantalla de un script para su {@code sam.screen.on}. @return si lo esperaba */
+    public synchronized boolean screenEvent(String script, ScreenSpec.Event event) {
+        var loaded = scripts.get(script);
+        if (loaded == null || loaded.state != State.RUNNING || loaded.screenHandler == null) {
+            return false;
+        }
+        var table = new LuaTable();
+        table.rawset("type", LuaSandbox.lua(event.type()));
+        if (event.id() != null) {
+            table.rawset("id", LuaSandbox.lua(event.id()));
+        }
+        if (event.value() instanceof Boolean flag) {
+            table.rawset("value", valueOf(flag));
+        } else if (event.value() instanceof String text) {
+            table.rawset("value", LuaSandbox.lua(text));
+        }
+        var handler = loaded.screenHandler;
+        run(loaded, () -> loaded.script.invoke(handler, table));
+        return true;
     }
 
-    /** Un jugador como lo ve Lua: solo copias de valores, nunca objetos de Minecraft (RS-LUA-02c). */
-    public record Player(String name, String uuid) {
+    /** El jugador apretó una tecla asignada a un script. @return si el script la esperaba */
+    public synchronized boolean keyPressed(String script, String id) {
+        var loaded = scripts.get(script);
+        var handler = loaded == null || loaded.state != State.RUNNING ? null : loaded.keys.get(id);
+        if (handler == null) {
+            return false;
+        }
+        run(loaded, () -> loaded.script.invoke(handler));
+        return true;
     }
 
-    /** Lo que los scripts pueden pedirle al servidor. */
-    public interface Bridge {
-        List<Player> players();
-
-        void tell(String player, String text);
-
-        void broadcast(String text);
-
-        void log(String script, String text);
-    }
-
-    /** Un script ya verificado (firma o modo desarrollo): su manifest y sus fuentes. */
-    public record Package(ScriptManifest manifest, Map<String, String> sources) {
+    /** Las imágenes del HUD de los scripts que están corriendo. */
+    public synchronized List<HudImage> hudImages() {
+        return scripts.values().stream().filter(l -> l.state == State.RUNNING).flatMap(l -> l.hud.values().stream())
+            .filter(HudImage.class::isInstance).map(HudImage.class::cast).toList();
     }
 
     public enum Event {
@@ -137,11 +262,19 @@ public final class ScriptHost {
         final List<String> errors = new ArrayList<>();
         final Map<Event, List<LuaFunction>> handlers = new EnumMap<>(Event.class);
         final Map<Integer, Task> tasks = new TreeMap<>();
-        final Map<String, HudText> hud = new LinkedHashMap<>();
+        /** {@link HudText} o {@link HudImage}, por id. */
+        final Map<String, Record> hud = new LinkedHashMap<>();
+        final Map<String, byte[]> assets;
+        LuaFunction screenHandler;
+        final java.util.Set<String> keyIds = new java.util.HashSet<>();
+        final Map<String, LuaFunction> keys = new java.util.HashMap<>();
+        final Map<String, LuaFunction> receivers = new java.util.HashMap<>();
+        int sent;
         int nextTask = 1;
 
         Loaded(Package pack) {
             this.manifest = pack.manifest();
+            this.assets = pack.assets();
             this.script = LuaSandbox.load(manifest.id(), pack.sources(), limits);
         }
 
@@ -154,20 +287,33 @@ public final class ScriptHost {
     private final ScriptLimits limits;
     /** En el cliente solo existen las capacidades del cliente, y en el servidor las del servidor. */
     private final boolean client;
+    /** Solo en el cliente: el juego (mensajes al servidor, pantallas, teclas). */
+    private final ClientBridge ui;
     private final Map<String, Loaded> scripts = new LinkedHashMap<>();
     private final Map<String, CommandEntry> commands = new LinkedHashMap<>();
     private java.util.Set<String> reserved = java.util.Set.of();
     private long tick;
 
-    /** El host del servidor. */
-    public ScriptHost(Bridge bridge, ScriptLimits limits) {
-        this(bridge, limits, false);
+    static {
+        // Inicializa el codec (y los buffers de Netty) fuera de la ventana de tiempo de un script: la
+        // primera vez tarda más que una llamada entera y suspendería al script que envía primero
+        try {
+            LuaData.decode(LuaData.encode(Constants.TRUE));
+        } catch (LuaError e) {
+            throw new ExceptionInInitializerError(e);
+        }
     }
 
-    private ScriptHost(Bridge bridge, ScriptLimits limits, boolean client) {
+    /** El host del servidor. */
+    public ScriptHost(Bridge bridge, ScriptLimits limits) {
+        this(bridge, limits, null);
+    }
+
+    private ScriptHost(Bridge bridge, ScriptLimits limits, ClientBridge ui) {
         this.bridge = bridge;
         this.limits = limits;
-        this.client = client;
+        this.client = ui != null;
+        this.ui = ui;
     }
 
     /** Descarta todo lo cargado y carga estos scripts (RF-LUA-02: errores aislados por script). */
@@ -180,6 +326,7 @@ public final class ScriptHost {
             var outcome = loaded.script.start(state -> installApi(loaded, state));
             if (outcome.error().isPresent()) {
                 loaded.state = State.FAILED;
+                closeScreen(loaded);
                 record(loaded, outcome.error().get());
                 commands.values().removeIf(entry -> entry.owner() == loaded);
             }
@@ -202,6 +349,7 @@ public final class ScriptHost {
     /** Un tick del servidor: corre las tareas que vencen ({@code sam.after}, {@code sam.every}). */
     public synchronized void tick() {
         tick++;
+        scripts.values().forEach(loaded -> loaded.sent = 0);
         for (var loaded : List.copyOf(scripts.values())) {
             var due = loaded.tasks.values().stream().filter(task -> task.due() <= tick).toList();
             for (var task : due) {
@@ -273,6 +421,7 @@ public final class ScriptHost {
         outcome.error().ifPresent(error -> record(loaded, error));
         if (outcome.exceeded()) {
             loaded.state = State.SUSPENDED;
+            closeScreen(loaded);
         }
         return outcome;
     }
@@ -327,11 +476,32 @@ public final class ScriptHost {
         if (!client && loaded.manifest.has("commands")) {
             functions.add(RegisteredFunction.ofV("command", (s, args) -> command(loaded, args)));
         }
+        if (loaded.manifest.has("messages")) {
+            functions.add(RegisteredFunction.ofV("send", (s, args) -> send(loaded, args)));
+            functions.add(RegisteredFunction.of("receive", (s, channel, fn) ->
+                valueOf(loaded.receivers.put(channel(channel), fn.checkFunction()) != null)));
+        }
         RegisteredFunction.bind(sam, functions.toArray(RegisteredFunction[]::new));
+        if (client && loaded.manifest.has("screens")) {
+            var screen = new LuaTable();
+            RegisteredFunction.bind(screen, new RegisteredFunction[] {
+                RegisteredFunction.of("open", (s, def) -> valueOf(ui.openScreen(loaded.id(), screenSpec(loaded, def.checkTable())))),
+                RegisteredFunction.of("close", s -> valueOf(ui.closeScreen(loaded.id()))),
+                RegisteredFunction.of("on", (s, fn) -> {
+                    var replaced = loaded.screenHandler != null;
+                    loaded.screenHandler = fn.checkFunction();
+                    return valueOf(replaced);
+                })});
+            sam.rawset("screen", screen);
+        }
+        if (client && loaded.manifest.has("keybinds")) {
+            RegisteredFunction.bind(sam, new RegisteredFunction[] {RegisteredFunction.ofV("key", (s, args) -> key(loaded, args))});
+        }
         if (client && loaded.manifest.has("hud")) {
             var hud = new LuaTable();
             RegisteredFunction.bind(hud, new RegisteredFunction[] {
                 RegisteredFunction.ofV("text", (s, args) -> hudText(loaded, args)),
+                RegisteredFunction.ofV("image", (s, args) -> hudImage(loaded, args)),
                 RegisteredFunction.of("remove", (s, id) -> valueOf(loaded.hud.remove(string(id)) != null)),
                 RegisteredFunction.of("clear", s -> {
                     var removed = loaded.hud.size();
@@ -383,6 +553,29 @@ public final class ScriptHost {
         return Constants.NONE;
     }
 
+    /** {@code sam.send(canal, datos)} en el cliente; {@code sam.send(jugador, canal, datos)} en el servidor. */
+    private org.squiddev.cobalt.Varargs send(Loaded loaded, org.squiddev.cobalt.Varargs args) throws LuaError {
+        var first = client ? 1 : 2;
+        var channel = channel(args.arg(first));
+        var data = LuaData.encode(args.arg(first + 1));
+        if (++loaded.sent > MAX_SENT) {
+            throw new LuaError("como mucho " + MAX_SENT + " mensajes por tick");
+        }
+        if (client) {
+            ui.send(loaded.id(), channel, data);
+            return Constants.NIL;
+        }
+        return valueOf(bridge.send(loaded.id(), string(args.arg(1)), channel, data));
+    }
+
+    private static String channel(LuaValue value) throws LuaError {
+        var channel = string(value);
+        if (!HUD_ID.matcher(channel).matches()) {
+            throw new LuaError("canal inválido \"" + channel + "\": [a-z0-9_], hasta 32");
+        }
+        return channel;
+    }
+
     /** {@code sam.hud.text(id, texto[, {anchor, x, y, color}])} (API de cliente v0). */
     private org.squiddev.cobalt.Varargs hudText(Loaded loaded, org.squiddev.cobalt.Varargs args) throws LuaError {
         var id = string(args.arg(1));
@@ -391,25 +584,194 @@ public final class ScriptHost {
         if (!HUD_ID.matcher(id).matches()) {
             throw new LuaError("id de HUD inválido \"" + id + "\": [a-z0-9_], hasta 32");
         }
-        var anchorName = options.rawget("anchor");
-        var anchor = Anchor.TOP_LEFT;
-        if (!anchorName.isNil()) {
-            var name = string(anchorName);
-            anchor = java.util.Arrays.stream(Anchor.values()).filter(a -> a.luaName().equals(name)).findFirst()
-                .orElseThrow(() -> new LuaError("ancla desconocida \"" + name + "\""));
-        }
+        var anchor = anchor(options.rawget("anchor"));
         var x = offset(options.rawget("x"));
         var y = offset(options.rawget("y"));
-        var colorValue = options.rawget("color");
-        var color = colorValue.isNil() ? 0xFFFFFF : colorValue.checkInteger();
-        if (color < 0 || color > 0xFFFFFF) {
-            throw new LuaError("color debe ser 0xRRGGBB");
+        var color = color(options.rawget("color"));
+        checkRoom(loaded, id);
+        loaded.hud.put(id, new HudText(loaded.id(), id, text, anchor, x, y, color));
+        return Constants.NONE;
+    }
+
+    /** {@code sam.hud.image(id, ruta[, {anchor, x, y, w, h}])}. */
+    private org.squiddev.cobalt.Varargs hudImage(Loaded loaded, org.squiddev.cobalt.Varargs args) throws LuaError {
+        var id = string(args.arg(1));
+        if (!HUD_ID.matcher(id).matches()) {
+            throw new LuaError("id de HUD inválido \"" + id + "\": [a-z0-9_], hasta 32");
         }
+        var path = string(args.arg(2));
+        var png = image(loaded, path);
+        var info = PngInfo.check(png);
+        var options = args.arg(3).isNil() ? new LuaTable() : args.arg(3).checkTable();
+        var anchor = anchor(options.rawget("anchor"));
+        var x = offset(options.rawget("x"));
+        var y = offset(options.rawget("y"));
+        var w = imageSide(options.rawget("w"), info.width());
+        var h = imageSide(options.rawget("h"), info.height());
+        checkRoom(loaded, id);
+        loaded.hud.put(id, new HudImage(loaded.id(), id, path, png, anchor, x, y, w, h));
+        return Constants.NONE;
+    }
+
+    private static void checkRoom(Loaded loaded, String id) throws LuaError {
         if (!loaded.hud.containsKey(id) && loaded.hud.size() >= MAX_HUD) {
             throw new LuaError("como mucho " + MAX_HUD + " textos por script");
         }
-        loaded.hud.put(id, new HudText(loaded.id(), id, text, anchor, x, y, color));
-        return Constants.NONE;
+    }
+
+    private static Anchor anchor(LuaValue value) throws LuaError {
+        if (value.isNil()) {
+            return Anchor.TOP_LEFT;
+        }
+        var name = string(value);
+        return java.util.Arrays.stream(Anchor.values()).filter(a -> a.luaName().equals(name)).findFirst()
+            .orElseThrow(() -> new LuaError("ancla desconocida \"" + name + "\""));
+    }
+
+    private static int color(LuaValue value) throws LuaError {
+        var color = value.isNil() ? 0xFFFFFF : value.checkInteger();
+        if (color < 0 || color > 0xFFFFFF) {
+            throw new LuaError("color debe ser 0xRRGGBB");
+        }
+        return color;
+    }
+
+    /** Los bytes de un PNG del propio script, ya revisados (RN-29). */
+    private static byte[] image(Loaded loaded, String path) throws LuaError {
+        var png = loaded.assets.get(path);
+        if (png == null) {
+            throw new LuaError("no hay una imagen \"" + path + "\" en el script");
+        }
+        try {
+            PngInfo.check(png);
+        } catch (IllegalArgumentException e) {
+            throw new LuaError(path + ": " + e.getMessage());
+        }
+        return png;
+    }
+
+    private static int imageSide(LuaValue value, int natural) throws LuaError {
+        var side = value.isNil() ? natural : value.checkInteger();
+        if (side < 1 || side > MAX_IMAGE) {
+            throw new LuaError("w y h de una imagen deben estar entre 1 y " + MAX_IMAGE);
+        }
+        return side;
+    }
+
+    // ===== Pantallas (screens) y teclas (keybinds) =====
+
+    private void closeScreen(Loaded loaded) {
+        if (client) {
+            ui.closeScreen(loaded.id());
+        }
+    }
+
+    /** {@code sam.key(id, tecla, fn)}: devuelve si el juego la asignó. */
+    private org.squiddev.cobalt.Varargs key(Loaded loaded, org.squiddev.cobalt.Varargs args) throws LuaError {
+        var id = string(args.arg(1));
+        var key = string(args.arg(2));
+        var fn = args.arg(3).checkFunction();
+        if (!HUD_ID.matcher(id).matches()) {
+            throw new LuaError("id de tecla inválido \"" + id + "\": [a-z0-9_], hasta 32");
+        }
+        if (!KEY.matcher(key).matches()) {
+            throw new LuaError("tecla desconocida \"" + key + "\" (a-z, 0-9 o f1-f12)");
+        }
+        if (loaded.keyIds.contains(id)) {
+            throw new LuaError("la tecla \"" + id + "\" ya está registrada");
+        }
+        if (loaded.keyIds.size() >= MAX_KEYS) {
+            throw new LuaError("como mucho " + MAX_KEYS + " teclas por script");
+        }
+        loaded.keyIds.add(id);
+        var bound = ui.bindKey(loaded.id(), id, key);
+        if (bound) {
+            loaded.keys.put(id, fn);
+        }
+        return valueOf(bound);
+    }
+
+    /** La pantalla declarativa de {@code sam.screen.open(def)} (PROTOCOLO.md 8.3), validada entera. */
+    private static ScreenSpec screenSpec(Loaded loaded, LuaTable def) throws LuaError {
+        var title = text(def.rawget("title"), MAX_TITLE, "el título");
+        if (PROTECTED_TITLES.contains(title.strip().toLowerCase(Locale.ROOT))) {
+            throw new LuaError("título reservado para las pantallas de SAM");
+        }
+        var width = range(def.rawget("width"), 0, MIN_WIDTH, MAX_WIDTH, "width");
+        var height = range(def.rawget("height"), 0, MIN_HEIGHT, MAX_HEIGHT, "height");
+        var list = def.rawget("widgets").checkTable();
+        if (list.length() > MAX_WIDGETS) {
+            throw new LuaError("como mucho " + MAX_WIDGETS + " widgets");
+        }
+        var widgets = new ArrayList<ScreenSpec.Widget>();
+        var ids = new java.util.HashSet<String>();
+        for (var i = 1; i <= list.length(); i++) {
+            var w = list.rawget(i).checkTable();
+            var type = string(w.rawget("type"));
+            var x = w.rawget("x").isNil() ? 0 : w.rawget("x").checkInteger();
+            var y = w.rawget("y").isNil() ? 0 : w.rawget("y").checkInteger();
+            if (x < 0 || x > width || y < 0 || y > height) {
+                throw new LuaError("x e y deben estar dentro del panel");
+            }
+            widgets.add(switch (type) {
+                case "label" -> new ScreenSpec.Label(x, y, text(w.rawget("text"), MAX_TEXT, "el texto"), color(w.rawget("color")));
+                case "button" -> new ScreenSpec.Button(widgetId(w, ids), x, y, text(w.rawget("text"), MAX_SHORT, "el texto"),
+                    range(w.rawget("w"), 80, 16, 400, "w"), range(w.rawget("h"), 20, 12, 40, "h"));
+                case "text_field" -> {
+                    var id = widgetId(w, ids);
+                    var width2 = range(w.rawget("w"), 120, 16, 400, "w");
+                    var max = range(w.rawget("max"), 64, 1, 256, "max");
+                    var value = w.rawget("value").isNil() ? "" : plainText(w.rawget("value"));
+                    if (value.length() > max) {
+                        throw new LuaError("value supera max");
+                    }
+                    yield new ScreenSpec.TextField(id, x, y, width2, max, value);
+                }
+                case "checkbox" -> new ScreenSpec.Checkbox(widgetId(w, ids), x, y, text(w.rawget("text"), MAX_SHORT, "el texto"),
+                    w.rawget("checked").toBoolean());
+                case "image" -> {
+                    var path = string(w.rawget("path"));
+                    var png = image(loaded, path);
+                    var info = PngInfo.check(png);
+                    yield new ScreenSpec.Image(path, png, x, y, imageSide(w.rawget("w"), info.width()),
+                        imageSide(w.rawget("h"), info.height()));
+                }
+                default -> throw new LuaError("widget de tipo desconocido \"" + type + "\"");
+            });
+        }
+        return new ScreenSpec(title, width, height, widgets);
+    }
+
+    private static String widgetId(LuaTable widget, java.util.Set<String> ids) throws LuaError {
+        var id = string(widget.rawget("id"));
+        if (!HUD_ID.matcher(id).matches()) {
+            throw new LuaError("id de widget inválido \"" + id + "\": [a-z0-9_], hasta 32");
+        }
+        if (!ids.add(id)) {
+            throw new LuaError("id de widget repetido \"" + id + "\"");
+        }
+        return id;
+    }
+
+    /** Texto plano (sin §) de hasta {@code max} caracteres. */
+    private static String text(LuaValue value, int max, String what) throws LuaError {
+        var text = plainText(value);
+        if (text.length() > max) {
+            throw new LuaError(what + " supera los " + max + " caracteres");
+        }
+        return text;
+    }
+
+    private static String plainText(LuaValue value) throws LuaError {
+        return string(value).replaceAll("§.?", "");
+    }
+
+    private static int range(LuaValue value, int fallback, int min, int max, String name) throws LuaError {
+        var number = value.isNil() ? fallback : value.checkInteger();
+        if (number < min || number > max) {
+            throw new LuaError(name + " debe estar entre " + min + " y " + max);
+        }
+        return number;
     }
 
     private static int offset(LuaValue value) throws LuaError {

@@ -56,6 +56,8 @@ final class ClientScriptsDelivery {
     private final Logger log;
     private final ServerDelivery.OnReject policy;
     private final Map<ServerConfigurationPacketListenerImpl, ServerDelivery> sessions = new ConcurrentHashMap<>();
+    /** Los scripts que aceptó cada jugador conectado (por nick): solo con ellos hay {@code sam:lua_msg}. */
+    private final Map<String, java.util.Set<String>> accepted = new ConcurrentHashMap<>();
     private final ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor(runnable -> {
         var thread = new Thread(runnable, "SAM scripts timeout");
         thread.setDaemon(true);
@@ -123,7 +125,19 @@ final class ClientScriptsDelivery {
         }
     }
 
+    /** Si ese jugador aceptó ese script en su conexión actual. */
+    boolean accepted(String nick, String script) {
+        return accepted.getOrDefault(nick, java.util.Set.of()).contains(script);
+    }
+
+    /** Al salir del juego, lo aceptado deja de valer. */
+    void forget(String nick) {
+        accepted.remove(nick);
+    }
+
     private void configure(ServerConfigurationPacketListenerImpl handler, MinecraftServer server) {
+        // Una conexión nueva empieza sin scripts aceptados
+        accepted.remove(handler.getOwner().getName());
         var offer = catalog;
         if (offer.isEmpty()) {
             return;
@@ -199,6 +213,7 @@ final class ClientScriptsDelivery {
             return;
         }
         log.info("[auditoría] {} aceptó los scripts {}", nick, reply.accepted());
+        accepted.put(nick, java.util.Set.copyOf(reply.accepted()));
         handler.completeTask(TASK);
     }
 

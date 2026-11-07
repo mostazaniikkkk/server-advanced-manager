@@ -137,7 +137,13 @@ public final class ClientDelivery {
             }
             var keyId = ((ScriptVerifier.Result.Valid) verdict).keyId();
             var signer = keys.stream().filter(k -> k.key().keyId().equals(keyId)).findFirst().orElseThrow().label();
-            return new Verdict(new Ready(new ScriptHost.Package(manifest, ScriptCatalog.sources(files)), signer), null);
+            var images = new java.util.TreeMap<String, byte[]>();
+            files.forEach((path, bytes) -> {
+                if (path.endsWith(".png")) {
+                    images.put(path, bytes);
+                }
+            });
+            return new Verdict(new Ready(new ScriptHost.Package(manifest, ScriptCatalog.sources(files), images), signer), null);
         } catch (IllegalArgumentException e) {
             return Verdict.fail(e.getMessage());
         }

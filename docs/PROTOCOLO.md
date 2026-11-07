@@ -487,8 +487,10 @@ S → C  sam:account_result      status: enum { OK, FAILED, LOCKED }, detail: Op
                                (después de cada operación llega un account_info nuevo)
 ```
 
+`sam:lua_msg` une la parte de cliente y la de servidor de **un mismo script** (`"side": "both"`, capacidad `messages` en el manifest): el servidor solo acepta mensajes de un script que ese jugador aceptó y que corre en el servidor, y solo le envía a un jugador los de scripts que aceptó; el cliente solo acepta mensajes de un script que tiene cargado. Un mensaje para un script que no cumple eso se descarta (los scripts pueden recargarse en medio). Mal formado → `SAM-P001`. Tope en el servidor por jugador y script: 20 mensajes por segundo (ráfaga de 40); los que se pasan se descartan con un aviso en el log.
+
 Con el 2FA activo, `account_email`, `account_unlink` y `totp_disable` exigen el código además de `k`. Los fallos de contraseña o de código en play cuentan para el mismo tope que en el login (SAM-K004).
-| `sam:lua_msg` | ambos | Canal de un script: `script_id`, `channel: String ≤ 32`, `data: bytes ≤ 4 KiB` |
+| `sam:lua_msg` | ambos | Canal de un script: `script: String ≤ 32`, `channel: String ≤ 32`, `data: bytes ≤ 4000` (un `LuaData`, 8.5) |
 | `sam:notice` | S → C | Avisos (actualización disponible para admins, alerta del trust store) |
 
 ---
@@ -698,7 +700,33 @@ Reglas de `commands`: nombre `[a-z][a-z0-9_]{0,31}`; `permission` por defecto 0 
 | `scheduler` | `sam.after`, `sam.every` y `sam.cancel`, en ticks del cliente (20 por segundo) |
 | `hud` | `sam.hud.text(id, texto[, {anchor, x, y, color}])` crea o reemplaza un texto en pantalla; `sam.hud.remove(id)` lo quita (devuelve si existía); `sam.hud.clear()` quita todos (devuelve cuántos) |
 
+| `messages` | `sam.send(canal, datos)` a la parte de servidor del mismo script; `sam.receive(canal, fn)` con `fn(datos)` (devuelve si reemplazó a otro) |
+| `screens` | `sam.screen.open(def)` (devuelve si se abrió), `sam.screen.close()` (devuelve si su pantalla estaba abierta) y `sam.screen.on(fn)` con los eventos de su propia pantalla (devuelve si reemplazó a otro) |
+| `keybinds` | `sam.key(id, tecla, fn)`: `fn()` al apretar la tecla en el mundo; devuelve si quedó asignada |
+
 Reglas de `hud`: `id` `[a-z0-9_]{1,32}`; texto plano ≤ 256 caracteres (sin códigos §); `anchor` uno de `top_left` (por defecto), `top`, `top_right`, `left`, `center`, `right`, `bottom_left`, `bottom`, `bottom_right`; `x` e `y` desplazamientos en píxeles de la GUI desde el ancla (−4096..4096, por defecto 0); `color` `0xRRGGBB` (por defecto blanco); como mucho 64 textos por script. El render **no** ejecuta Lua: dibuja cada frame lo último que los scripts dejaron. Si un script se suspende o falla, sus textos desaparecen. Un script con `hud` nunca dibuja sobre las pantallas de SAM (RS-LUA-07): el HUD solo se dibuja en el mundo, sin pantallas abiertas.
+
+En el servidor, `messages` agrega `sam.send(jugador, canal, datos)` (devuelve `false` si ese jugador no aceptó el script o no está en línea) y `sam.receive(canal, fn)` con `fn(jugador, datos)`. Reglas de `messages`: `canal` `[a-z0-9_]{1,32}`, `datos` un `LuaData` (8.5) de hasta 4000 bytes; como mucho 32 envíos por tick por script; un `receive` por canal (el último reemplaza al anterior).
+
+`hud` también dibuja imágenes: `sam.hud.image(id, ruta[, {anchor, x, y, w, h}])` con `ruta` un PNG del propio script (por ejemplo `assets/icono.png`), `w`/`h` el tamaño en píxeles de la GUI (por defecto el de la imagen, 1..512). Cuenta para el tope de 64 elementos.
+
+**Pantallas (`screens`, RF-LUA-06b).** `def` es una tabla declarativa: `{title, width, height, widgets}` con `width` 64..400 y `height` 32..300 (píxeles de la GUI, centrada) y hasta 64 widgets, cada uno con `x`, `y` relativos a la esquina del panel:
+
+| `type` | Campos |
+|---|---|
+| `label` | `text` (≤ 256), `color` |
+| `button` | `id`, `text` (≤ 64), `w` (16..400, por defecto 80), `h` (por defecto 20) |
+| `text_field` | `id`, `w`, `max` (1..256, por defecto 64), `value` inicial |
+| `checkbox` | `id`, `text`, `checked` |
+| `image` | `path` (PNG del script), `w`, `h` |
+
+`id` `[a-z0-9_]{1,32}`, único en la pantalla. Eventos para `sam.screen.on`: `{type = "click", id}`, `{type = "change", id, value}` (texto o booleano) y `{type = "close"}`. Toda pantalla de script lleva abajo la marca **"Interfaz del servidor"**, que el script no puede quitar ni tapar (RS-LUA-09), y su título no puede ser el de una pantalla de SAM. Solo se abre en el mundo, sin pantalla o sobre otra pantalla de script; nunca sobre una pantalla de SAM ni de vanilla (devuelve `false`).
+
+**Pantallas protegidas (RS-LUA-07/08).** Mientras hay una pantalla de SAM abierta (inicio de sesión, consentimiento de scripts, cuenta, 2FA), los scripts del cliente no reciben nada: ni ticks, ni teclas, ni mensajes, ni eventos de pantalla, y el HUD no se dibuja. Los mensajes que llegan en ese tiempo esperan (hasta 64) y se entregan al cerrarla.
+
+**Teclas (`keybinds`, RF-LUA-06e).** `tecla` es `a`..`z`, `0`..`9` o `f1`..`f12`; como mucho 8 por script. Solo se escuchan en el mundo sin pantalla abierta. Si la tecla ya la usa una acción del juego o de otro mod, no se asigna. El jugador puede cambiarla o desactivarla (`none`) en `config/sam-client/script-keys.properties`, con una línea `<servidor>.<script>.<id>=<tecla>` que SAM agrega la primera vez.
+
+**Imágenes (RF-LUA-08, RN-29).** Solo archivos `.png` del script, de hasta 64 KiB y 256×256 píxeles. Antes de decodificarlos se revisan la firma PNG y la cabecera `IHDR`; se decodifican con `NativeImage` de vanilla y se suben a la GPU una vez por conexión; se liberan al salir.
 
 **Vector** (`cryptography` de Python; fijado en `ScriptSignatureTest` y `ScriptSigningTest`): el lockfile de arriba firmado con la clave K1 de la RFC 8032 (`key_id` = `21fe31dfa154a261`):
 
@@ -714,6 +742,20 @@ Lo que se transfiere al cliente es el `ScriptPackage` de 5.5 (los archivos del l
 
 - Clave privada en un archivo PKCS#8 cifrado (PBES2, scrypt o PBKDF2-SHA256 con ≥ 600 000 iteraciones) con passphrase (RS-SIG-07).
 - Comandos: `sam-signer keygen`, `sam-signer sign <carpeta>`, `sam-signer verify <carpeta>`, `sam-signer pubkey`.
+
+### 8.5 `LuaData` (datos de los mensajes de scripts)
+
+Un valor de Lua copiado, sin funciones ni referencias: con el codec de 4.1, un byte de tipo y su valor.
+
+| Tipo | Valor |
+|---|---|
+| 0 | `nil` |
+| 1 / 2 | `false` / `true` |
+| 3 | número: `Float64` big-endian (NaN e infinitos se rechazan) |
+| 4 | texto: `String ≤ 4000` (UTF-8) |
+| 5 | tabla: `VarInt n` y `n` pares `(clave, valor)`; la clave es un número o un texto |
+
+Como mucho 8 niveles de tablas anidadas y 256 pares en total. Un valor que no cumple (una función, una tabla que se contiene a sí misma, más de 4000 bytes) no se envía: `sam.send` falla con el motivo. Al recibir, lo mismo es `SAM-P001`.
 
 ---
 

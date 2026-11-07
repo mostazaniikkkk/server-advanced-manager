@@ -138,4 +138,21 @@ class ScriptsMessagesTest {
         assertThat(ScriptsWant.MAX_BYTES).isLessThanOrEqualTo(4608);
         assertThat(ScriptsConsent.MAX_BYTES).isLessThanOrEqualTo(8704);
     }
+
+    @Test
+    void elMensajeDeUnScriptLlevaSuIdCanalYDatos() {
+        var mensaje = new LuaMessage("panel", "abrir", new byte[] {2});
+        var leido = leer(escribir(mensaje::write), LuaMessage.MAX_BYTES, LuaMessage::read);
+        assertThat(leido).usingRecursiveComparison().isEqualTo(mensaje);
+        var maximo = new LuaMessage("a".repeat(32), "c".repeat(32), new byte[4000]);
+        assertThat(leer(escribir(maximo::write), LuaMessage.MAX_BYTES, LuaMessage::read).data()).hasSize(4000);
+        malFormado(w -> w.string("a".repeat(33), 33), LuaMessage::read, "largo 33 fuera de 0..32");
+        malFormado(w -> w.string("a", 32).string("c".repeat(33), 33), LuaMessage::read, "largo 33 fuera de 0..32");
+        malFormado(w -> w.string("a", 32).string("c", 32).bytes(new byte[4001], 8000), LuaMessage::read, "largo 4001 fuera de 0..4000");
+        var datos = new byte[] {1};
+        var copia = new LuaMessage("a", "b", datos);
+        datos[0] = 9;
+        copia.data()[0] = 9;
+        assertThat(copia.data()).containsExactly(1);
+    }
 }
