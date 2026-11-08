@@ -81,9 +81,7 @@ public final class AuditLog {
 
     public synchronized void append(String type, String actor, String ip, String detail) throws IOException {
         var seq = head.seq() + 1;
-        var prefix = "{\"seq\":" + seq + ",\"t\":" + quote(clock.instant().toString()) + ",\"type\":" + quote(type)
-            + ",\"actor\":" + quote(actor) + ",\"ip\":" + quote(ip) + ",\"detail\":" + quote(detail)
-            + ",\"prev\":\"" + head.hash() + "\"";
+        var prefix = prefix(seq, clock.instant().toString(), type, actor, ip, detail, head.hash());
         var hash = sha256(prefix);
         var line = prefix + HASH_KEY + hash + "\"}\n";
         if (!Files.exists(file)) {
@@ -92,6 +90,54 @@ public final class AuditLog {
             Files.writeString(file, line, StandardCharsets.UTF_8, StandardOpenOption.APPEND);
         }
         head = new Head(seq, hash);
+    }
+
+    /** Cuántas IPs se borraron y la cabeza de la cadena antes y después (RF-AUTH-08b). */
+    public record Anonymized(int lines, Head before, Head after) {
+    }
+
+    public static final String RETENTION_ENV = "SAM_AUDIT_IP_RETENTION";
+
+    /** {@code SAM_AUDIT_IP_RETENTION}, 90 días por defecto. */
+    public static java.time.Duration retention(java.util.Map<String, String> config) {
+        return dev.sam.common.auth.SessionClock.parse(RETENTION_ENV, config.getOrDefault(RETENTION_ENV, "90d"));
+    }
+
+    /**
+     * RF-AUTH-08b (H-11): borra la IP de las líneas anteriores a {@code cutoff} y recalcula la cadena desde la primera
+     * que cambia. Vacío si no había nada que borrar.
+     */
+    public synchronized java.util.Optional<Anonymized> anonymizeBefore(Instant cutoff) throws IOException {
+        var out = new java.util.ArrayList<String>();
+        var prev = ZEROS;
+        var count = 0;
+        var seq = 0L;
+        for (var line : read(file)) {
+            var json = JsonParser.parseString(line).getAsJsonObject();
+            seq = json.get("seq").getAsLong();
+            var ip = json.get("ip").getAsString();
+            var old = !ip.isEmpty() && Instant.parse(json.get("t").getAsString()).isBefore(cutoff);
+            if (old) {
+                count++;
+            }
+            // Las líneas sin cambios se rearman idénticas; desde la primera que cambia, cambian los hashes
+            var prefix = prefix(seq, json.get("t").getAsString(), json.get("type").getAsString(), json.get("actor").getAsString(),
+                old ? "" : ip, json.get("detail").getAsString(), prev);
+            prev = sha256(prefix);
+            out.add(prefix + HASH_KEY + prev + "\"}");
+        }
+        if (count == 0) {
+            return java.util.Optional.empty();
+        }
+        SecureFiles.writeString(file, String.join("\n", out) + "\n");
+        var before = head;
+        head = new Head(seq, prev);
+        return java.util.Optional.of(new Anonymized(count, before, head));
+    }
+
+    private static String prefix(long seq, String t, String type, String actor, String ip, String detail, String prev) {
+        return "{\"seq\":" + seq + ",\"t\":" + quote(t) + ",\"type\":" + quote(type) + ",\"actor\":" + quote(actor)
+            + ",\"ip\":" + quote(ip) + ",\"detail\":" + quote(detail) + ",\"prev\":\"" + prev + "\"";
     }
 
     public synchronized Head head() {

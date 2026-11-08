@@ -105,6 +105,8 @@ public final class SamServer implements DedicatedServerModInitializer {
             config = loadConfig();
             transport = TransportConfig.from(config);
             SamAudit.commands(dev.sam.common.audit.SensitiveCommands.fromConfig(config));
+            SamAudit.retention(dev.sam.common.audit.AuditLog.retention(config));
+            SamAudit.anonymizeIfDue(java.time.Instant.now());
         } catch (IllegalArgumentException | IOException e) {
             LOGGER.error("Configuración inválida: {}. El login de SAM queda cerrado.", e.getMessage());
             return;
@@ -155,6 +157,7 @@ public final class SamServer implements DedicatedServerModInitializer {
                 return;
             }
             var now = java.time.Instant.now();
+            SamAudit.anonymizeIfDue(now);
             for (var nick : AUTH.sessions().adminExpired(now)) {
                 var player = s.getPlayerList().getPlayerByName(nick);
                 SamAudit.event("sesion.admin.vencida", nick, "", "la sesión verificada venció: sin poderes de OP hasta volver a entrar");

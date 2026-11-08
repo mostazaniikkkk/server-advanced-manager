@@ -48,7 +48,7 @@ Las brechas marcadas **[operador]** tocan el equipo o el servidor del operador. 
 | H-08 | ✅ | **Cerrada 2026-11-08** (`AuditLog` + `SamAudit`, RF-AUTH-08a): `config/sam/audit.jsonl` encadenado por SHA-256 y solo del dueño, `/sam audit verify|last|export` como comandos sensibles, cabeza de la cadena en el log al arrancar. Verificado en un clon y con un verificador independiente en Python
 | H-09 | ✅ | **Cerrada 2026-11-08** (RF-ADM-06a): intentos fallidos y logins con IP y motivo; cada cambio de `/sam perms` con el JSON de antes y después; los comandos de `SAM_AUDIT_COMMANDS` (también dentro de `execute ... run`) de jugadores, consola y RCON. Verificado en un clon
 | H-10 | ✅ | **Cerrada 2026-11-08** (van a `config/sam/secretos-sugeridos.txt`, solo del dueño). Antes: **secretos en el log**: los valores sugeridos de `SAM_IDENTITY_PASSPHRASE` y `SAM_DATA_KEY` se escriben en `latest.log` y en sus archivos rotados |
-| H-11 | P2 | `SAM_AUDIT_IP_RETENTION` está documentada pero no se usa: no hay retención |
+| H-11 | ✅ | **Cerrada 2026-11-08** (RF-AUTH-08b): al arrancar y una vez por día se borran las IPs de la auditoría más viejas que `SAM_AUDIT_IP_RETENTION` (90 d), se recalcula la cadena y se registra `auditoria.anonimizada` con la cabeza anterior y la nueva. Verificado en un clon (15 IPs borradas, cadena íntegra con `/sam audit verify` y con un verificador independiente) |
 
 ### Protección de datos (A.8.10-8.12, A.8.24, A.5.34 / C1.1-1.2)
 

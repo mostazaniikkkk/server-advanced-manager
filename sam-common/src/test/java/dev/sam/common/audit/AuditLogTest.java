@@ -248,4 +248,53 @@ class AuditLogTest {
         Files.writeString(archivo(), "basura\n", java.nio.file.StandardOpenOption.APPEND);
         assertThat(AuditLog.byActor(archivo(), "steve")).hasSize(2);
     }
+
+    // ===== Retención de IPs (RF-AUTH-08b, H-11) =====
+
+    @Test
+    void lasIpsViejasSeBorranYLaCadenaSigueSana() throws Exception {
+        var log = abrir();
+        log.append("login.ok", "Steve", "1.1.1.1", "viejo");
+        ahora = ahora.plusSeconds(100);
+        log.append("login.ok", "Alex", "2.2.2.2", "viejo");
+        ahora = ahora.plusSeconds(100);
+        log.append("login.ok", "Zoe", "3.3.3.3", "nuevo");
+        var cabezaAntes = log.head();
+        var corte = Instant.parse("2026-11-08T12:02:00Z");
+        var resultado = log.anonymizeBefore(corte).orElseThrow();
+        assertThat(resultado.lines()).isEqualTo(2);
+        assertThat(resultado.before()).isEqualTo(cabezaAntes);
+        assertThat(resultado.after()).isEqualTo(log.head());
+        var lineas = Files.readAllLines(archivo());
+        assertThat(lineas.get(0)).contains("\"ip\":\"\"").contains("\"actor\":\"Steve\"");
+        assertThat(lineas.get(1)).contains("\"ip\":\"\"");
+        assertThat(lineas.get(2)).contains("\"ip\":\"3.3.3.3\"");
+        assertThat(AuditLog.verify(archivo())).isEqualTo(AuditLog.Verification.ok(3));
+        assertThat(FilePermissions.readableByOthers(archivo())).isFalse();
+        // Sigue escribiendo sobre la cadena nueva
+        log.append("x", "y", "", "");
+        assertThat(AuditLog.verify(archivo())).isEqualTo(AuditLog.Verification.ok(4));
+        assertThat(log.anonymizeBefore(corte)).isEmpty();
+    }
+
+    @Test
+    void sinIpsViejasNoCambiaNada() throws Exception {
+        var log = abrir();
+        log.append("a", "b", "", "sin ip");
+        log.append("a", "b", "9.9.9.9", "nuevo");
+        var antes = Files.readString(archivo());
+        assertThat(log.anonymizeBefore(Instant.parse("2026-11-08T12:00:00Z"))).isEmpty();
+        assertThat(log.anonymizeBefore(Instant.parse("2026-11-08T12:00:01Z"))).hasValueSatisfying(r -> assertThat(r.lines()).isEqualTo(1));
+        assertThat(Files.readString(archivo())).isNotEqualTo(antes);
+        assertThat(AuditLog.verify(archivo())).isEqualTo(AuditLog.Verification.ok(2));
+        assertThat(abrir().anonymizeBefore(Instant.parse("2027-01-01T00:00:00Z"))).isEmpty();
+    }
+
+    @Test
+    void laRetencionSaleDelEnv() {
+        assertThat(AuditLog.retention(java.util.Map.of())).isEqualTo(java.time.Duration.ofDays(90));
+        assertThat(AuditLog.retention(java.util.Map.of("SAM_AUDIT_IP_RETENTION", "30d"))).isEqualTo(java.time.Duration.ofDays(30));
+        assertThatThrownBy(() -> AuditLog.retention(java.util.Map.of("SAM_AUDIT_IP_RETENTION", "30")))
+            .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("SAM_AUDIT_IP_RETENTION");
+    }
 }

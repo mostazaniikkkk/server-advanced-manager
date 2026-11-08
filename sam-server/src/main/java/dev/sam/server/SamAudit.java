@@ -50,6 +50,34 @@ public final class SamAudit {
         }
     }
 
+    private static volatile java.time.Duration retention = java.time.Duration.ofDays(90);
+    private static volatile java.time.Instant lastAnonymize = java.time.Instant.EPOCH;
+
+    /** {@code SAM_AUDIT_IP_RETENTION} (RF-AUTH-08b). */
+    static void retention(java.time.Duration value) {
+        retention = value;
+    }
+
+    /** RF-AUTH-08b (H-11): una vez por día (y al arrancar), borra las IPs más viejas que la retención. */
+    static void anonymizeIfDue(java.time.Instant now) {
+        var current = chain;
+        if (current == null || now.isBefore(lastAnonymize.plus(java.time.Duration.ofDays(1)))) {
+            return;
+        }
+        lastAnonymize = now;
+        try {
+            current.anonymizeBefore(now.minus(retention)).ifPresent(done -> event("auditoria.anonimizada", "SAM", "",
+                done.lines() + " IPs de más de " + (retention.toDays() > 0 ? retention.toDays() + " días" : retention.toSeconds() + " s")
+                    + " borradas; cabeza anterior " + done.before().seq() + " "
+                    + done.before().hash() + ", nueva " + done.after().hash()));
+        } catch (IOException | RuntimeException e) {
+            var log = logger;
+            if (log != null) {
+                log.error("No se pudieron anonimizar las IPs viejas de la auditoría: {}", e.getMessage());
+            }
+        }
+    }
+
     /** El archivo de la cadena (para {@code /sam audit}). */
     public static Path file() {
         return file;
