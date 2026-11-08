@@ -98,6 +98,7 @@ public final class SamServer implements DedicatedServerModInitializer {
         SamAudit.install(LOGGER, FabricLoader.getInstance().getConfigDir().resolve("sam/audit.jsonl"));
         AUTH.install();
         ACCOUNT.install();
+        installRotate();
         TransportConfig transport;
         Map<String, String> config;
         try {
@@ -239,21 +240,25 @@ public final class SamServer implements DedicatedServerModInitializer {
             var google = GoogleSignIn.fromConfig(config);
             var methods = google.isPresent() ? List.of(AuthMethod.PASSWORD, AuthMethod.GOOGLE) : List.of(AuthMethod.PASSWORD);
             var policy = new AuthPolicyView(methods, false, false, EmailVerify.LATER, minPassword);
-            var accounts = new AccountService(AccountsFile.load(file), Argon2Params.SERVER_DEFAULT, new SecureRandom(),
+            // RF-CFG-12: el correo y el Google cifrados con la clave de datos (y la anterior, si se está rotando)
+            var ring = dataRing(config);
+            var fields = ring.map(r -> new dev.sam.common.totp.FieldCipher(r, new SecureRandom()));
+            var accounts = new AccountService(AccountsFile.load(file, fields), Argon2Params.SERVER_DEFAULT, new SecureRandom(),
                 all -> {
                     try {
-                        AccountsFile.save(file, all);
+                        AccountsFile.save(file, all, fields);
                     } catch (IOException e) {
                         throw new UncheckedIOException("No se pudieron guardar las cuentas en " + file, e);
                     }
-                }, dataVault(config), java.time.Clock.systemUTC());
+                }, ring.map(r -> new dev.sam.common.totp.TotpVault(r, new SecureRandom())), java.time.Clock.systemUTC());
             AUTH.sessions(dev.sam.common.auth.SessionClock.fromConfig(config));
             var throttle = new dev.sam.common.auth.LoginThrottle(dev.sam.common.auth.LoginThrottle.Limits.fromConfig(config),
                 java.time.InstantSource.system());
             AUTH.activate(new SamAuth.Setup(accounts, serverId, policy, google, throttle));
             ACCOUNT.activate(new SamAccount.Setup(accounts, google));
             LOGGER.info("Login de SAM abierto: contraseña{}; {} cuentas en {}",
-                google.map(g -> " y Google (client_id " + g.clientId() + ")").orElse(""), AccountsFile.load(file).size(), file);
+                google.map(g -> " y Google (client_id " + g.clientId() + ")").orElse(""), AccountsFile.load(file, fields).size(), file);
+            ROTATE.set(accounts);
             return true;
         } catch (IOException | IllegalArgumentException e) {
             LOGGER.error("Cuentas o política de login inválidas: {}. El login de SAM queda cerrado.", e.getMessage());
@@ -277,7 +282,7 @@ public final class SamServer implements DedicatedServerModInitializer {
      * La bóveda del 2FA (RS-AUTH-03) con {@code SAM_DATA_KEY}, que solo puede venir del entorno del proceso
      * (el .env la rechaza, RF-CFG-08). Sin ella el 2FA no se puede activar; el login sigue.
      */
-    private static java.util.Optional<dev.sam.common.totp.TotpVault> dataVault(Map<String, String> config) {
+    private static java.util.Optional<dev.sam.common.totp.KeyRing> dataRing(Map<String, String> config) {
         var value = config.get(dev.sam.common.totp.DataKey.ENV);
         if (value == null || value.isBlank()) {
             LOGGER.warn("2FA no disponible: falta {} en el entorno del proceso (guárdalo: sin él no se pueden verificar "
@@ -287,12 +292,40 @@ public final class SamServer implements DedicatedServerModInitializer {
         }
         try {
             var key = dev.sam.common.totp.DataKey.parse(value);
-            LOGGER.info("2FA disponible (clave de datos cargada)");
-            return java.util.Optional.of(new dev.sam.common.totp.TotpVault(key, new SecureRandom()));
+            var previous = java.util.Optional.ofNullable(config.get(dev.sam.common.totp.KeyRing.PREVIOUS_ENV))
+                .filter(v -> !v.isBlank()).map(dev.sam.common.totp.DataKey::parse);
+            LOGGER.info("2FA disponible (clave de datos {} cargada{})", key.id(),
+                previous.map(p -> "; rotando desde " + p.id() + ": usa sam datakey rotate").orElse(""));
+            return java.util.Optional.of(new dev.sam.common.totp.KeyRing(key, previous));
         } catch (IllegalArgumentException e) {
             LOGGER.error("2FA no disponible: {}", e.getMessage());
             return java.util.Optional.empty();
         }
+    }
+
+    /** Las cuentas activas, para {@code sam datakey rotate} (RF-CFG-12). */
+    private static final java.util.concurrent.atomic.AtomicReference<AccountService> ROTATE =
+        new java.util.concurrent.atomic.AtomicReference<>();
+
+    /** {@code sam datakey rotate}: solo la consola real (RF-CFG-12). */
+    private static void installRotate() {
+        net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback.EVENT.register((dispatcher, registry, environment) ->
+            dispatcher.register(net.minecraft.commands.Commands.literal("sam").then(net.minecraft.commands.Commands.literal("datakey")
+                .requires(SamConsole::isConsole)
+                .then(net.minecraft.commands.Commands.literal("rotate").executes(c -> {
+                    var accounts = ROTATE.get();
+                    if (accounts == null) {
+                        c.getSource().sendFailure(net.minecraft.network.chat.Component.literal(
+                            "El login de SAM está cerrado: no hay cuentas cargadas."));
+                        return 0;
+                    }
+                    var count = accounts.rekey();
+                    SamAudit.event("datakey.rotacion", "consola", "", count + " 2FA y todos los correos vueltos a cifrar con la clave actual");
+                    c.getSource().sendSuccess(() -> net.minecraft.network.chat.Component.literal("Listo: " + count
+                        + " 2FA y todos los correos y Google quedaron cifrados con la clave actual. Ya puedes quitar "
+                        + dev.sam.common.totp.KeyRing.PREVIOUS_ENV + "."), false);
+                    return 1;
+                })))));
     }
 
     /**

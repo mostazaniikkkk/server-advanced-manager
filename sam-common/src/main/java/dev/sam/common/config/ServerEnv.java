@@ -14,7 +14,9 @@ public final class ServerEnv {
 
     public static final String DATA_KEY = "SAM_DATA_KEY";
     public static final String IDENTITY_PASSPHRASE = "SAM_IDENTITY_PASSPHRASE";
-    public static final List<String> MASTER_SECRETS = List.of(DATA_KEY, IDENTITY_PASSPHRASE);
+    /** RF-CFG-12: la clave de datos anterior durante una rotación. */
+    public static final String DATA_KEY_PREVIOUS = "SAM_DATA_KEY_PREVIOUS";
+    public static final List<String> MASTER_SECRETS = List.of(DATA_KEY, DATA_KEY_PREVIOUS, IDENTITY_PASSPHRASE);
 
     private ServerEnv() {
     }

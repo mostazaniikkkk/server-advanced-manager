@@ -114,6 +114,26 @@ public final class AccountService {
     public record TotpBegin(AccountResult result, Optional<Enrollment> enrollment) {
     }
 
+    /** RF-CFG-12: vuelve a sellar todos los 2FA con la clave actual; devuelve cuántos. */
+    public synchronized int rekey() {
+        if (vault.isEmpty()) {
+            return 0;
+        }
+        var count = 0;
+        for (var account : List.copyOf(accounts.values())) {
+            if (account.totp().isPresent()) {
+                var state = vault.get().open(account.key(), account.totp().get());
+                if (state.isPresent()) {
+                    accounts.put(account.key(), account.withTotp(Optional.of(vault.get().seal(account.key(), state.get()))));
+                    count++;
+                }
+            }
+        }
+        // Guardar también vuelve a sellar el correo y el Google con la clave actual
+        onChange.accept(List.copyOf(accounts.values()));
+        return count;
+    }
+
     public synchronized boolean hasTotp(String nick) {
         var account = accounts.get(Nick.normalize(nick));
         return account != null && account.totp().isPresent();

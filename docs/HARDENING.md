@@ -55,8 +55,8 @@ Las brechas marcadas **[operador]** tocan el equipo o el servidor del operador. 
 | Id | P | Brecha |
 |---|---|---|
 | H-12 | ✅ | **Cerrada 2026-11-08** (`SecureFiles`, RF-CFG-10). Antes: **permisos de archivos**: `identity.p12`, `permissions.json`, los `.dat` de scripts y el trust store se escriben sin restringirlos al dueño. En el cliente, `pins.json` y los consentimientos tampoco |
-| H-13 | P2 | El correo y el `sub` de Google se guardan en claro en `accounts.json`, aunque el `.env` dice que se cifran |
-| H-14 | P2 | `SAM_DATA_KEY` no se puede rotar: los blobs no llevan id de clave ni existe un comando de recifrado |
+| H-13 | ✅ | **Cerrada 2026-11-08** (RF-CFG-12, `FieldCipher`): correo y `sub` de Google cifrados con AES-256-GCM y AAD por campo y cuenta; los valores viejos en claro se migran al guardar; sin la clave el archivo no abre. Verificado en un clon |
+| H-14 | ✅ | **Cerrada 2026-11-08** (RF-CFG-12, `KeyRing`): id de clave en los valores, `SAM_DATA_KEY_PREVIOUS` para leer durante la rotación y `sam datakey rotate` (solo consola) para volver a cifrar 2FA, correos y Google con la nueva. Verificado en un clon: rotación completa y login con 2FA con solo la clave nueva |
 | H-15 | P2 | Borrado incompleto: `sam auth reset` no borra los datos de scripts ni los permisos del jugador, y no hay borrado ni exportación por el propio jugador (RF-AUTH-07c) |
 
 ### Continuidad y respaldo (A.8.13, A.5.30 / A1.2-1.3)

@@ -32,6 +32,11 @@ class ServerEnvTest {
     }
 
     @Test
+    void laClaveAnteriorDeLaRotacionTambienEsUnSecretoMaestro() {
+        assertThat(ServerEnv.MASTER_SECRETS).containsExactly("SAM_DATA_KEY", "SAM_DATA_KEY_PREVIOUS", "SAM_IDENTITY_PASSPHRASE");
+    }
+
+    @Test
     void unSecretoMaestroEnElArchivoImpideArrancar() {
         for (var clave : ServerEnv.MASTER_SECRETS) {
             assertThatThrownBy(() -> ServerEnv.merge(Map.of(clave, "abc"), Map.of(clave, "abc")))

@@ -42,6 +42,16 @@ public final class DataKey {
         return Base64.getEncoder().encodeToString(bytes);
     }
 
+    /** Los primeros 8 hex del SHA-256 de la clave: dice con cuál se cifró algo, sin revelarla (RF-CFG-12). */
+    public String id() {
+        try {
+            var hash = java.security.MessageDigest.getInstance("SHA-256").digest(key.getEncoded());
+            return java.util.HexFormat.of().formatHex(hash, 0, 4);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     SecretKey key() {
         return key;
     }

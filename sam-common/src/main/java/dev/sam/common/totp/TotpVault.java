@@ -23,11 +23,16 @@ public final class TotpVault {
     private static final int TAG_BITS = 128;
     private static final int VERSION = 1;
 
-    private final DataKey key;
+    private final KeyRing ring;
     private final SecureRandom random;
 
     public TotpVault(DataKey key, SecureRandom random) {
-        this.key = key;
+        this(new KeyRing(key, Optional.empty()), random);
+    }
+
+    /** Con rotación (RF-CFG-12): sella con la actual y abre con cualquiera del anillo. */
+    public TotpVault(KeyRing ring, SecureRandom random) {
+        this.ring = ring;
         this.random = random;
     }
 
@@ -36,7 +41,7 @@ public final class TotpVault {
         random.nextBytes(nonce);
         try {
             var cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.ENCRYPT_MODE, key.key(), new GCMParameterSpec(TAG_BITS, nonce));
+            cipher.init(Cipher.ENCRYPT_MODE, ring.current().key(), new GCMParameterSpec(TAG_BITS, nonce));
             cipher.updateAAD(aad(account));
             var sealed = cipher.doFinal(encode(state));
             return Base64.getEncoder().encodeToString(ByteBuffer.allocate(NONCE + sealed.length).put(nonce).put(sealed).array());
@@ -46,6 +51,16 @@ public final class TotpVault {
     }
 
     public Optional<TotpState> open(String account, String sealed) {
+        for (var key : ring.all()) {
+            var opened = open(key, account, sealed);
+            if (opened.isPresent()) {
+                return opened;
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static Optional<TotpState> open(DataKey key, String account, String sealed) {
         try {
             var bytes = Base64.getDecoder().decode(sealed);
             var cipher = Cipher.getInstance("AES/GCM/NoPadding");

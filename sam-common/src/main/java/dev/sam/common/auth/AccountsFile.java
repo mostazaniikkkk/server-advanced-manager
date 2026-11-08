@@ -14,6 +14,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 
+import dev.sam.common.totp.FieldCipher;
+
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
 import com.google.gson.stream.JsonWriter;
@@ -33,6 +35,10 @@ public final class AccountsFile {
     }
 
     public static String encode(List<Account> accounts) {
+        return encode(accounts, Optional.empty());
+    }
+
+    static String encode(List<Account> accounts, Optional<FieldCipher> cipher) {
         var out = new StringWriter();
         try (var writer = new JsonWriter(out)) {
             writer.setIndent("  ");
@@ -43,9 +49,9 @@ public final class AccountsFile {
                 writer.beginObject();
                 writer.name("nick").value(account.nick());
                 writer.name("hash").value(account.passwordHash());
-                writer.name("email").value(account.email());
+                writer.name("email").value(sealed(cipher, "email:" + account.key(), account.email()));
                 if (account.googleSub().isPresent()) {
-                    writer.name("google").value(account.googleSub().get());
+                    writer.name("google").value(sealed(cipher, "google:" + account.key(), account.googleSub().get()));
                 }
                 if (account.totp().isPresent()) {
                     writer.name("totp").value(account.totp().get());
@@ -60,13 +66,38 @@ public final class AccountsFile {
         return out + "\n";
     }
 
+    private static String sealed(Optional<FieldCipher> cipher, String context, String value) {
+        return cipher.map(c -> c.seal(context, value)).orElse(value);
+    }
+
     /** @throws IllegalArgumentException si el contenido no es válido */
     public static List<Account> decode(String json) {
+        return decode(json, Optional.empty());
+    }
+
+    static List<Account> decode(String json, Optional<FieldCipher> cipher) {
         try {
-            return read(json);
+            return read(json, cipher);
         } catch (IOException | IllegalStateException | NumberFormatException e) {
             throw invalid(e.getMessage());
         }
+    }
+
+    /** RF-CFG-12: con la clave de datos, el correo y el Google se leen cifrados (o en claro, si son viejos). */
+    public static List<Account> load(Path file, Optional<FieldCipher> cipher) throws IOException {
+        if (!Files.exists(file)) {
+            return List.of();
+        }
+        try {
+            return decode(Files.readString(file), cipher);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(e.getMessage() + " (" + file + ")", e);
+        }
+    }
+
+    /** RF-CFG-12: con la clave de datos, el correo y el Google se guardan cifrados con la actual. */
+    public static void save(Path file, List<Account> accounts, Optional<FieldCipher> cipher) throws IOException {
+        dev.sam.common.config.SecureFiles.writeString(file, encode(accounts, cipher));
     }
 
     /** Sin archivo, no hay cuentas. */
@@ -86,7 +117,7 @@ public final class AccountsFile {
         dev.sam.common.config.SecureFiles.writeString(file, encode(accounts));
     }
 
-    private static List<Account> read(String json) throws IOException {
+    private static List<Account> read(String json, Optional<FieldCipher> cipher) throws IOException {
         var reader = new JsonReader(new StringReader(json));
         Integer version = null;
         List<Account> accounts = null;
@@ -105,7 +136,7 @@ public final class AccountsFile {
                     }
                     version = reader.nextInt();
                 }
-                case "accounts" -> accounts = readAccounts(reader);
+                case "accounts" -> accounts = readAccounts(reader, cipher);
                 default -> throw invalid("campo desconocido " + name);
             }
         }
@@ -118,13 +149,13 @@ public final class AccountsFile {
         return accounts;
     }
 
-    private static List<Account> readAccounts(JsonReader reader) throws IOException {
+    private static List<Account> readAccounts(JsonReader reader, Optional<FieldCipher> cipher) throws IOException {
         var accounts = new ArrayList<Account>();
         var keys = new HashSet<String>();
         var googleSubs = new HashSet<String>();
         reader.beginArray();
         while (reader.hasNext()) {
-            var account = readAccount(reader);
+            var account = readAccount(reader, cipher);
             if (!keys.add(account.key())) {
                 throw invalid("cuenta repetida " + account.key());
             }
@@ -138,7 +169,7 @@ public final class AccountsFile {
         return List.copyOf(accounts);
     }
 
-    private static Account readAccount(JsonReader reader) throws IOException {
+    private static Account readAccount(JsonReader reader, Optional<FieldCipher> cipher) throws IOException {
         var fields = new HashMap<String, String>();
         reader.beginObject();
         while (reader.hasNext()) {
@@ -154,8 +185,9 @@ public final class AccountsFile {
         reader.endObject();
         var nick = fields.get("nick");
         var hash = fields.get("hash");
-        var email = fields.get("email");
-        var google = Optional.ofNullable(fields.get("google"));
+        var key = nick == null ? "" : Nick.normalize(nick);
+        var email = opened(cipher, "email:" + key, fields.get("email"));
+        var google = Optional.ofNullable(fields.get("google")).map(value -> opened(cipher, "google:" + key, value));
         var totp = Optional.ofNullable(fields.get("totp"));
         if (fields.size() != 3 + (google.isPresent() ? 1 : 0) + (totp.isPresent() ? 1 : 0) || !Nick.isValid(nick) || !AccountService.isValidEmail(email)) {
             throw invalid("cuenta incompleta o con nick o correo inválido");
@@ -172,6 +204,16 @@ public final class AccountsFile {
             throw invalid("totp vacío en la cuenta " + nick);
         }
         return new Account(Nick.normalize(nick), nick, hash, email, google, totp);
+    }
+
+    /** Un valor cifrado se abre con la clave de datos; uno en claro (viejo) se deja como está. */
+    private static String opened(Optional<FieldCipher> cipher, String context, String value) {
+        if (value == null || !FieldCipher.isSealed(value)) {
+            return value;
+        }
+        return cipher.flatMap(c -> c.open(context, value)).orElseThrow(() ->
+            invalid("datos cifrados que no se pueden abrir: falta SAM_DATA_KEY o no es la misma (o la anterior en "
+                + "SAM_DATA_KEY_PREVIOUS)"));
     }
 
     private static IllegalArgumentException invalid(String detail) {
