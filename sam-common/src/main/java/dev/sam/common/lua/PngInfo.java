@@ -16,10 +16,15 @@ public record PngInfo(int width, int height) {
     private static final byte[] IHDR = {0, 0, 0, 13, 'I', 'H', 'D', 'R'};
     private static final int HEADER = SIGNATURE.length + IHDR.length + 8;
 
-    /** @throws IllegalArgumentException con el motivo si no se puede usar */
+    /** Con los topes de las imágenes de un script (64 KiB, 256×256). */
     public static PngInfo check(byte[] png) {
-        if (png.length > MAX_BYTES) {
-            throw new IllegalArgumentException("la imagen supera los 64 KiB");
+        return check(png, MAX_BYTES, MAX_SIDE);
+    }
+
+    /** @throws IllegalArgumentException con el motivo si no se puede usar */
+    public static PngInfo check(byte[] png, int maxBytes, int maxSide) {
+        if (png.length > maxBytes) {
+            throw new IllegalArgumentException("la imagen supera los " + maxBytes / 1024 + " KiB");
         }
         if (png.length < HEADER || !Arrays.equals(png, 0, SIGNATURE.length, SIGNATURE, 0, SIGNATURE.length)
                 || !Arrays.equals(png, SIGNATURE.length, SIGNATURE.length + IHDR.length, IHDR, 0, IHDR.length)) {
@@ -31,8 +36,8 @@ public record PngInfo(int width, int height) {
         if (width < 1 || height < 1) {
             throw new IllegalArgumentException("la imagen no tiene píxeles");
         }
-        if (width > MAX_SIDE || height > MAX_SIDE) {
-            throw new IllegalArgumentException("la imagen mide más de 256×256");
+        if (width > maxSide || height > maxSide) {
+            throw new IllegalArgumentException("la imagen mide más de " + maxSide + "×" + maxSide);
         }
         return new PngInfo(width, height);
     }

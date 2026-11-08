@@ -12,10 +12,10 @@ import org.junit.jupiter.api.Test;
  * Las imágenes de un script (RF-LUA-08, RN-29): antes de decodificarlas se revisan la firma PNG y la
  * cabecera IHDR, con tope de bytes y de dimensiones.
  */
-class PngInfoTest {
+public class PngInfoTest {
 
     /** Un PNG mínimo: firma, IHDR y lo que sigue (no se decodifica). */
-    static byte[] png(int width, int height, int extra) {
+    public static byte[] png(int width, int height, int extra) {
         var out = new ByteArrayOutputStream();
         out.writeBytes(new byte[] {(byte) 0x89, 'P', 'N', 'G', 13, 10, 26, 10});
         out.writeBytes(ByteBuffer.allocate(8).putInt(13).put(new byte[] {'I', 'H', 'D', 'R'}).array());
