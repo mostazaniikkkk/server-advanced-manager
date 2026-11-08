@@ -86,15 +86,19 @@ public final class SamClient implements ClientModInitializer {
             LOGGER.info("[dev] En el mundo como {}; el juego se cierra en {} s", client.getUser().getName(), seconds);
             // -Dsam.dev.command="hola mundo|otro": ejecuta comandos al entrar (pruebas de los comandos de scripts)
             var command = System.getProperty("sam.dev.command");
-            if (command != null) {
-                // Varios comandos separados por "|", en orden
-                for (var each : command.split("\\|")) {
-                    client.execute(() -> handler.sendCommand(each.strip()));
+            // Varios comandos separados por "|", en orden; con closeScreenAfter, después de cerrar la pantalla
+            Runnable commands = () -> {
+                if (command != null) {
+                    for (var each : command.split("\\|")) {
+                        client.execute(() -> handler.sendCommand(each.strip()));
+                    }
                 }
-            }
+            };
             // -Dsam.dev.closeScreenAfter=N: a los N s cierra la pantalla que haya (la de otro mod al entrar)
             var close = Integer.getInteger("sam.dev.closeScreenAfter");
-            if (close != null) {
+            if (close == null) {
+                commands.run();
+            } else {
                 var closer = new Thread(() -> {
                     try {
                         Thread.sleep(close * 1000L);
@@ -102,6 +106,7 @@ public final class SamClient implements ClientModInitializer {
                         Thread.currentThread().interrupt();
                     }
                     client.execute(() -> client.setScreen(null));
+                    commands.run();
                 }, "SAM dev close");
                 closer.setDaemon(true);
                 closer.start();
@@ -118,13 +123,7 @@ public final class SamClient implements ClientModInitializer {
                 // -Dsam.dev.keepScreen=true: captura con la pantalla abierta (la de un script) y después la cierra
                 var keep = Boolean.getBoolean("sam.dev.keepScreen");
                 if (shot != null && keep) {
-                    // Cierra lo que haya (otro mod), da 2 s para que el script abra la suya y la captura
-                    client.execute(() -> client.setScreen(null));
-                    try {
-                        Thread.sleep(2000);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    }
+                    // Captura la pantalla abierta tal como está (la de otro mod se cierra antes con closeScreenAfter)
                     client.execute(() -> net.minecraft.client.Screenshot.grab(client.gameDirectory, shot + ".png",
                         client.getMainRenderTarget(), message -> LOGGER.info("[dev] Captura: {}", message.getString())));
                 }

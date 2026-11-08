@@ -96,8 +96,9 @@ final class ScriptScreen extends Screen {
         }
         // La marca va al final y debajo del panel: nada del script la tapa (RS-LUA-09)
         var markWidth = font.width(MARK) + 6;
-        var markX = left + spec.width() + 4 - markWidth;
-        var markY = top + spec.height() + 6;
+        var markX = Math.max(0, Math.min(left + spec.width() + 4, width) - markWidth);
+        // Siempre dentro de la ventana, aunque el panel del script no entre (RS-LUA-09): se dibuja al final, encima
+        var markY = Math.min(top + spec.height() + 6, height - 12);
         graphics.fill(markX, markY, markX + markWidth, markY + 11, 0xF0000000);
         graphics.drawString(font, MARK, markX + 3, markY + 2, 0xFFFFAA00);
     }
