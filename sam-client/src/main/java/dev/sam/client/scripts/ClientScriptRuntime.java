@@ -86,6 +86,19 @@ final class ClientScriptRuntime implements ScriptHost.ClientBridge {
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> client.execute(this::stop));
         ClientTickEvents.END_CLIENT_TICK.register(this::tick);
         HudRenderCallback.EVENT.register((graphics, delta) -> renderHud(graphics));
+        // Las entradas de los plugins en el botón de Opciones de cuenta (capacidad menu). Elegir una cierra el
+        // inventario y avisa al script en el próximo paso: así puede abrir su pantalla (no se abre sobre otra)
+        dev.sam.client.account.AccountMenu.plugins(() -> !running || blocked() ? java.util.List.of() : host.menuEntries().stream()
+            .map(entry -> new dev.sam.client.account.AccountMenu.Item(entry.label(), () -> {
+                var minecraft = Minecraft.getInstance();
+                minecraft.setScreen(null);
+                minecraft.tell(() -> {
+                    if (running) {
+                        host.menuClicked(entry.script(), entry.id());
+                    }
+                });
+            }, entry.icon().<dev.sam.client.account.AccountMenu.IconDrawer>map(png -> (graphics, x, y) ->
+                drawImage(graphics, entry.script(), "menu:" + entry.id(), png, x, y, 12, 12)).orElse(null))).toList());
         // Menú de pausa → "Teclas de scripts", si los scripts de este servidor usan teclas
         net.fabricmc.fabric.api.client.screen.v1.ScreenEvents.AFTER_INIT.register((client, screen, width, height) -> {
             if (screen instanceof net.minecraft.client.gui.screens.PauseScreen && !keyChoices().isEmpty()) {

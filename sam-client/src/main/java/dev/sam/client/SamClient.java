@@ -29,6 +29,7 @@ public final class SamClient implements ClientModInitializer {
             FabricLoader.getInstance().getConfigDir().resolve("sam-client/scripts.properties"));
         dev.sam.client.account.SamClientAccount.install(LOGGER);
         dev.sam.client.account.SamClientAccount.devHook();
+        dev.sam.client.account.SamClientAccount.devMenu();
         devQuitAfterJoin();
         devQuitOnDisconnect();
         devServerList();

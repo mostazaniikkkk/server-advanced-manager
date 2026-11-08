@@ -46,6 +46,8 @@ public final class ScriptHost {
     private static final int MAX_IMAGE = 512;
     private static final int MAX_TAB = 200;
     private static final int MAX_KEYS = 8;
+    private static final int MAX_MENU = 4;
+    private static final int MAX_MENU_LABEL = 32;
     private static final int MAX_TITLE = 64;
     private static final int MAX_SHORT = 64;
     private static final int MAX_WIDGETS = 64;
@@ -260,6 +262,32 @@ public final class ScriptHost {
         return true;
     }
 
+    /** Una entrada de un plugin en el botón de Opciones de cuenta (capacidad {@code menu}). */
+    public record MenuEntry(String script, String id, String label, int order, Optional<byte[]> icon) {
+    }
+
+    private record MenuItem(String label, int order, Optional<byte[]> icon, LuaFunction function) {
+    }
+
+    /** Las entradas de los scripts que están corriendo, por {@code order} y texto. */
+    public synchronized List<MenuEntry> menuEntries() {
+        return scripts.values().stream().filter(l -> l.state == State.RUNNING)
+            .flatMap(l -> l.menu.entrySet().stream().map(e -> new MenuEntry(l.id(), e.getKey(), e.getValue().label(),
+                e.getValue().order(), e.getValue().icon())))
+            .sorted(java.util.Comparator.comparingInt(MenuEntry::order).thenComparing(MenuEntry::label)).toList();
+    }
+
+    /** El jugador eligió una entrada del menú. @return si el script la tenía */
+    public synchronized boolean menuClicked(String script, String id) {
+        var loaded = scripts.get(script);
+        var item = loaded == null || loaded.state != State.RUNNING ? null : loaded.menu.get(id);
+        if (item == null) {
+            return false;
+        }
+        run(loaded, () -> loaded.script.invoke(item.function()));
+        return true;
+    }
+
     /** Las imágenes del HUD de los scripts que están corriendo. */
     public synchronized List<HudImage> hudImages() {
         return scripts.values().stream().filter(l -> l.state == State.RUNNING).flatMap(l -> l.hud.values().stream())
@@ -309,6 +337,7 @@ public final class ScriptHost {
         LuaFunction screenHandler;
         final java.util.Set<String> keyIds = new java.util.HashSet<>();
         final Map<String, LuaFunction> keys = new java.util.HashMap<>();
+        final Map<String, MenuItem> menu = new LinkedHashMap<>();
         final Map<String, LuaFunction> receivers = new java.util.HashMap<>();
         int sent;
         int nextTask = 1;
@@ -553,6 +582,13 @@ public final class ScriptHost {
                     return valueOf(replaced);
                 })});
             sam.rawset("screen", screen);
+        }
+        if (client && loaded.manifest.has("menu")) {
+            var menu = new LuaTable();
+            RegisteredFunction.bind(menu, new RegisteredFunction[] {
+                RegisteredFunction.ofV("add", (s, args) -> menuAdd(loaded, args)),
+                RegisteredFunction.of("remove", (s, id) -> valueOf(loaded.menu.remove(string(id)) != null))});
+            sam.rawset("menu", menu);
         }
         if (client && loaded.manifest.has("keybinds")) {
             RegisteredFunction.bind(sam, new RegisteredFunction[] {RegisteredFunction.ofV("key", (s, args) -> key(loaded, args))});
@@ -802,6 +838,27 @@ public final class ScriptHost {
         if (client) {
             ui.closeScreen(loaded.id());
         }
+    }
+
+    /** {@code sam.menu.add(id, texto, fn[, {icon, order}])}: devuelve si reemplazó una entrada. */
+    private org.squiddev.cobalt.Varargs menuAdd(Loaded loaded, org.squiddev.cobalt.Varargs args) throws LuaError {
+        var id = string(args.arg(1));
+        if (!HUD_ID.matcher(id).matches()) {
+            throw new LuaError("id de menú inválido \"" + id + "\": [a-z0-9_], hasta 32");
+        }
+        var label = text(args.arg(2), MAX_MENU_LABEL, "el texto");
+        if (label.isBlank()) {
+            throw new LuaError("el texto no puede estar vacío");
+        }
+        var fn = args.arg(3).checkFunction();
+        var options = args.arg(4).isNil() ? new LuaTable() : args.arg(4).checkTable();
+        var order = range(options.rawget("order"), 100, 0, 999, "order");
+        Optional<byte[]> icon = options.rawget("icon").isNil() ? Optional.empty()
+            : Optional.of(image(loaded, string(options.rawget("icon"))));
+        if (!loaded.menu.containsKey(id) && loaded.menu.size() >= MAX_MENU) {
+            throw new LuaError("como mucho " + MAX_MENU + " entradas de menú por script");
+        }
+        return valueOf(loaded.menu.put(id, new MenuItem(label, order, icon, fn)) != null);
     }
 
     /** {@code sam.key(id, tecla, fn)}: devuelve si el juego la asignó. */

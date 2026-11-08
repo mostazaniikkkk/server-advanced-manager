@@ -50,7 +50,7 @@ El id de una imagen son 16 bytes aleatorios, no un contador. Un `media_get` de a
 
 ## Orden de trabajo
 
-1. API `menu` (el menú desplegable en el inventario).
+1. API `menu` (el menú desplegable en el inventario). **Hecho** (PROTOCOLO.md 8.3).
 2. API `links`.
 3. API `media`: protocolo, almacén en memoria con topes, captura, selector de archivos, widget.
 4. El plugin en Lua (servidor y cliente) y sus pruebas de punta a punta.

@@ -104,9 +104,68 @@ public final class SamClientAccount {
         // El botón en el inventario (supervivencia y creativo), abajo a la derecha de la pantalla
         ScreenEvents.AFTER_INIT.register((client, screen, width, height) -> {
             if ((screen instanceof InventoryScreen || screen instanceof CreativeModeInventoryScreen) && ClientPlayNetworking.canSend(REQUEST)) {
-                Screens.getButtons(screen).add(new AccountButton(width - AccountButton.SIZE - 4, height - AccountButton.SIZE - 4,
-                    () -> client.setScreen(new AccountScreen(screen))));
+                var buttons = Screens.getButtons(screen);
+                var menu = new java.util.ArrayList<net.minecraft.client.gui.components.AbstractWidget>();
+                var x = width - AccountButton.SIZE - 4;
+                var y = height - AccountButton.SIZE - 4;
+                buttons.add(new AccountButton(x, y, () -> {
+                    var plugins = AccountMenu.pluginItems();
+                    // Sin entradas de plugins, el botón abre Opciones de cuenta como siempre
+                    if (plugins.isEmpty()) {
+                        client.setScreen(new AccountScreen(screen));
+                        return;
+                    }
+                    // Con entradas, es un menú desplegable hacia arriba: Opciones de cuenta y después los plugins
+                    if (!menu.isEmpty()) {
+                        buttons.removeAll(menu);
+                        menu.clear();
+                        return;
+                    }
+                    var items = new java.util.ArrayList<AccountMenu.Item>();
+                    items.add(new AccountMenu.Item("Opciones de cuenta", () -> client.setScreen(new AccountScreen(screen)), null));
+                    items.addAll(plugins);
+                    var right = x + AccountButton.SIZE;
+                    for (var i = 0; i < items.size(); i++) {
+                        var item = items.get(i);
+                        var top = y - (items.size() - i) * 21;
+                        menu.add(new MenuItemButton(right - MenuItemButton.WIDTH, top, item));
+                    }
+                    buttons.addAll(menu);
+                }));
             }
+        });
+    }
+
+    /**
+     * Solo en desarrollo: {@code -Dsam.dev.menu=nombre} abre el inventario, aprieta el botón de cuenta (captura
+     * {@code nombre-menu} con el desplegable), elige la última entrada (la de un plugin) y captura {@code nombre}.
+     */
+    public static void devMenu() {
+        var name = System.getProperty("sam.dev.menu");
+        if (!net.fabricmc.loader.api.FabricLoader.getInstance().isDevelopmentEnvironment() || name == null) {
+            return;
+        }
+        net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
+            var thread = new Thread(() -> {
+                pause(4000);
+                client.execute(() -> client.setScreen(new InventoryScreen(client.player)));
+                pause(1000);
+                client.execute(() -> Screens.getButtons(client.screen).stream().filter(AccountButton.class::isInstance).findFirst()
+                    .ifPresent(button -> ((AccountButton) button).onPress()));
+                pause(800);
+                client.execute(() -> grab(client, name + "-menu"));
+                pause(500);
+                client.execute(() -> {
+                    var items = Screens.getButtons(client.screen).stream().filter(MenuItemButton.class::isInstance).toList();
+                    if (!items.isEmpty()) {
+                        ((MenuItemButton) items.getLast()).onPress();
+                    }
+                });
+                pause(1500);
+                client.execute(() -> grab(client, name));
+            }, "SAM dev menu");
+            thread.setDaemon(true);
+            thread.start();
         });
     }
 
