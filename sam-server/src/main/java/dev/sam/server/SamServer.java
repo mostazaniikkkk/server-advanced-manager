@@ -119,6 +119,16 @@ public final class SamServer implements DedicatedServerModInitializer {
             FabricLoader.getInstance().getConfigDir().resolve("sam/permissions.json"), config, AUTH::verified));
         net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.DISCONNECT.register((handler, s) ->
             AUTH.forget(handler.getPlayer().getGameProfile().getName()));
+        // RF-ADM-03/04 (H-01, H-02): un OP sin 2FA entra como jugador normal y se le dice cómo activar sus permisos
+        net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.JOIN.register((handler, sender, s) -> {
+            var profile = handler.getPlayer().getGameProfile();
+            if (s.getPlayerList().isOp(profile) && !AUTH.verified(profile.getName())) {
+                LOGGER.info("[auditoría] {} es OP pero entró sin 2FA: juega sin permisos de OP", profile.getName());
+                handler.getPlayer().sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                    "Eres admin, pero tus permisos de OP solo se activan con el 2FA. Actívalo en el inventario, botón "
+                    + "\"Opciones de cuenta\", y vuelve a entrar.").withStyle(net.minecraft.ChatFormatting.GOLD));
+            }
+        });
         scripts = dev.sam.server.scripts.SamScripts.install(LOGGER, FabricLoader.getInstance().getConfigDir().resolve("sam/keys"), config,
             Optional.ofNullable(scriptData));
         // Los límites aplican aunque el login de SAM quede cerrado: el vanilla también pasa por la compuerta
@@ -186,6 +196,11 @@ public final class SamServer implements DedicatedServerModInitializer {
      * Cuentas y política de login (MVP: solo contraseña). Si las cuentas no se pueden leer, el login
      * queda cerrado: arrancar sin ellas dejaría registrar de nuevo el nick de otro (RF-CFG-04).
      */
+    /** RF-ADM-04: si el jugador completó el 2FA en esta sesión (lo usa el mixin del nivel de OP). */
+    public static boolean verified(String nick) {
+        return AUTH.verified(nick);
+    }
+
     private static boolean startAuth(ServerId serverId, Map<String, String> config) {
         var file = FabricLoader.getInstance().getConfigDir().resolve("sam/accounts.json");
         try {
