@@ -534,6 +534,19 @@ public record PermissionSet(Map<String, Group> groups, Map<String, User> users) 
         return mine.stream().anyMatch(group -> !Objects.equals(before.groups().get(group), after.groups().get(group)));
     }
 
+    /** RF-AUTH-07e: la entrada de un jugador como se guarda en el archivo, para exportar sus datos. */
+    public Optional<String> userJson(String nick) {
+        var key = nick.toLowerCase(java.util.Locale.ROOT);
+        return users.containsKey(key) ? Optional.of(entity(this, "users", key, "")) : Optional.empty();
+    }
+
+    /** RF-AUTH-07e: el mismo conjunto sin la entrada de ese jugador (borrado de sus datos). */
+    public PermissionSet withoutUser(String nick) {
+        var copy = new LinkedHashMap<>(users);
+        copy.remove(nick.toLowerCase(java.util.Locale.ROOT));
+        return new PermissionSet(groups, copy);
+    }
+
     /** H-09: qué cambió entre dos estados, entidad por entidad ("grupo x: antes -> después; ..."), en una línea. */
     public static String diff(PermissionSet before, PermissionSet after) {
         var changes = new ArrayList<String>();

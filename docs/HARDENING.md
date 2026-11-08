@@ -57,7 +57,7 @@ Las brechas marcadas **[operador]** tocan el equipo o el servidor del operador. 
 | H-12 | ✅ | **Cerrada 2026-11-08** (`SecureFiles`, RF-CFG-10). Antes: **permisos de archivos**: `identity.p12`, `permissions.json`, los `.dat` de scripts y el trust store se escriben sin restringirlos al dueño. En el cliente, `pins.json` y los consentimientos tampoco |
 | H-13 | ✅ | **Cerrada 2026-11-08** (RF-CFG-12, `FieldCipher`): correo y `sub` de Google cifrados con AES-256-GCM y AAD por campo y cuenta; los valores viejos en claro se migran al guardar; sin la clave el archivo no abre. Verificado en un clon |
 | H-14 | ✅ | **Cerrada 2026-11-08** (RF-CFG-12, `KeyRing`): id de clave en los valores, `SAM_DATA_KEY_PREVIOUS` para leer durante la rotación y `sam datakey rotate` (solo consola) para volver a cifrar 2FA, correos y Google con la nueva. Verificado en un clon: rotación completa y login con 2FA con solo la clave nueva |
-| H-15 | P2 | Borrado incompleto: `sam auth reset` no borra los datos de scripts ni los permisos del jugador, y no hay borrado ni exportación por el propio jugador (RF-AUTH-07c) |
+| H-15 | ✅ | **Cerrada 2026-11-08** (RF-AUTH-07e): "Exportar datos" y "Borrar cuenta" en Opciones de cuenta, con contraseña y 2FA; el export trae la cuenta, los permisos y su auditoría; el borrado (y `sam auth reset`) quita la cuenta, sus permisos y avisa a los scripts con `erase` (SAM Basics borra homes y conversaciones). Los fallos de contraseña en Opciones de cuenta usan el mismo bloqueo que el login. Verificado en un clon |
 
 ### Continuidad y respaldo (A.8.13, A.5.30 / A1.2-1.3)
 

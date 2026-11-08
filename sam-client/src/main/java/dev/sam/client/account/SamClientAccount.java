@@ -47,6 +47,8 @@ public final class SamClientAccount {
     public static final CustomPacketPayload.Type<SamPayload> OAUTH_CODE = SamPayload.type(OAuthCode.ID);
     public static final CustomPacketPayload.Type<SamPayload> TOTP_BEGIN = SamPayload.type(TotpBegin.ID);
     public static final CustomPacketPayload.Type<SamPayload> TOTP_ENROLL = SamPayload.type(TotpEnroll.ID);
+    public static final CustomPacketPayload.Type<SamPayload> DATA = SamPayload.type(dev.sam.common.proto.account.AccountData.ID);
+    public static final CustomPacketPayload.Type<SamPayload> EXPORT = SamPayload.type(dev.sam.common.proto.account.AccountExport.ID);
     public static final CustomPacketPayload.Type<SamPayload> TOTP_CONFIRM = SamPayload.type(TotpConfirm.ID);
     public static final CustomPacketPayload.Type<SamPayload> TOTP_DISABLE = SamPayload.type(TotpDisable.ID);
 
@@ -68,6 +70,27 @@ public final class SamClientAccount {
         PayloadTypeRegistry.playC2S().register(TOTP_CONFIRM, SamPayload.codec(TOTP_CONFIRM, TotpConfirm.MAX_BYTES));
         PayloadTypeRegistry.playC2S().register(TOTP_DISABLE, SamPayload.codec(TOTP_DISABLE, TotpDisable.MAX_BYTES));
         PayloadTypeRegistry.playS2C().register(TOTP_ENROLL, SamPayload.codec(TOTP_ENROLL, MAX_SERVER_MESSAGE));
+        // RF-AUTH-07e: exportar y borrar los datos del jugador
+        PayloadTypeRegistry.playC2S().register(DATA, SamPayload.codec(DATA, dev.sam.common.proto.account.AccountData.MAX_BYTES));
+        PayloadTypeRegistry.playS2C().register(EXPORT, SamPayload.codec(EXPORT, dev.sam.common.proto.account.AccountExport.MAX_BYTES));
+        ClientPlayNetworking.registerGlobalReceiver(EXPORT, (payload, context) -> {
+            var export = SamReader.decode(Unpooled.wrappedBuffer(payload.data()), dev.sam.common.proto.account.AccountExport.MAX_BYTES,
+                dev.sam.common.proto.account.AccountExport::read);
+            var client = context.client();
+            var server = client.getCurrentServer() == null ? "servidor" : client.getCurrentServer().name;
+            var name = (server + "-" + client.getUser().getName()).replaceAll("[^A-Za-z0-9_-]", "_") + "-"
+                + java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").format(java.time.LocalDateTime.now()) + ".json";
+            var file = client.gameDirectory.toPath().resolve("sam-exports").resolve(name);
+            try {
+                dev.sam.common.config.SecureFiles.writeString(file, export.json());
+                log.info("Datos de la cuenta exportados a {}", file);
+                if (client.screen instanceof AccountScreen screen) {
+                    screen.onExported(file);
+                }
+            } catch (java.io.IOException e) {
+                log.error("No se pudieron guardar tus datos en {}: {}", file, e.getMessage());
+            }
+        });
         ClientPlayNetworking.registerGlobalReceiver(TOTP_ENROLL, (payload, context) -> {
             var enroll = decode(payload, TotpEnroll::read);
             if (enroll != null && context.client().screen instanceof AccountScreen screen) {
@@ -236,6 +259,29 @@ public final class SamClientAccount {
                         }
                     });
                     pause(5000);
+                }
+                // exportar / borrar (RF-AUTH-07e): con la contraseña y, si hay, el código del archivo de TOTP
+                if (mode.equals("exportar") || mode.equals("borrar")) {
+                    // Con 2FA, el código del login ya se usó: se espera al paso siguiente (anti-replay)
+                    if (System.getProperty("sam.dev.totpFile") != null) {
+                        pause(31_000 - System.currentTimeMillis() % 30_000);
+                    }
+                    client.execute(() -> {
+                        if (client.screen instanceof AccountScreen screen) {
+                            screen.devData(mode.equals("borrar"), System.getProperty("sam.dev.accountPassword",
+                                System.getProperty("sam.dev.password", "")));
+                        }
+                    });
+                    pause(1500);
+                    client.execute(() -> grab(client, "cuenta-" + mode + "-pregunta"));
+                    pause(500);
+                    client.execute(() -> {
+                        if (client.screen instanceof net.minecraft.client.gui.screens.ConfirmScreen confirm) {
+                            Screens.getButtons(confirm).stream().filter(b -> b.getMessage().getString().equals("Sí, borrar todo"))
+                                .findFirst().ifPresent(b -> ((net.minecraft.client.gui.components.Button) b).onPress());
+                        }
+                    });
+                    pause(6000);
                 }
                 client.execute(() -> grab(client, "cuenta-" + mode));
             }, "SAM dev cuenta");

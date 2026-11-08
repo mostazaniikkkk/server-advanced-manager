@@ -78,4 +78,17 @@ class PermissionDiffTest {
         var antes = PermissionSet.empty().createGroup("temporal", 0).addUserGroup("steve", "temporal", OptionalLong.of(AHORA - 1));
         assertThat(PermissionSet.affects(antes, antes.setGroupPermission("temporal", "*", SI), "steve", AHORA)).isFalse();
     }
+
+    // ===== Datos del jugador (RF-AUTH-07e, H-15) =====
+
+    @Test
+    void laEntradaDeUnJugadorEnJsonYSuBorrado() {
+        var set = PermissionSet.empty().createGroup("vip", 0).addUserGroup("steve", "vip", OptionalLong.empty())
+            .addUserGroup("alex", "vip", OptionalLong.empty());
+        assertThat(set.userJson("Steve")).contains("{\"groups\":{\"vip\":{}},\"permissions\":{},\"meta\":{}}");
+        assertThat(set.userJson("nadie")).isEmpty();
+        var sin = set.withoutUser("STEVE");
+        assertThat(sin.users()).containsOnlyKeys("alex");
+        assertThat(sin.withoutUser("nadie")).isEqualTo(sin);
+    }
 }

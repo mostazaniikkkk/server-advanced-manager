@@ -61,11 +61,28 @@ public final class SamAccount {
     private static final String GOOGLE_DISABLED = "Google no está habilitado en este servidor";
 
     /** Lo que necesita; llega junto con el login. */
-    public record Setup(AccountService accounts, Optional<GoogleSignIn> google) {
+    public record Setup(AccountService accounts, Optional<GoogleSignIn> google, dev.sam.common.auth.LoginThrottle throttle) {
     }
 
+    /** Lo que SamServer agrega al exportar y al borrar los datos de un jugador (RF-AUTH-07e). */
+    public interface DataHooks {
+        /** Lo demás que se sabe del jugador (permisos, auditoría), como pares nombre → JSON. */
+        Map<String, com.google.gson.JsonElement> export(String nick);
+
+        /** Borra lo demás del jugador (permisos y datos de los scripts). */
+        void erase(MinecraftServer server, String nick, String uuid);
+    }
+
+    private volatile DataHooks hooks;
+
+    public void hooks(DataHooks dataHooks) {
+        hooks = dataHooks;
+    }
+
+    public static final CustomPacketPayload.Type<SamPayload> DATA = SamPayload.type(dev.sam.common.proto.account.AccountData.ID);
+    public static final CustomPacketPayload.Type<SamPayload> EXPORT = SamPayload.type(dev.sam.common.proto.account.AccountExport.ID);
+
     private final Logger log;
-    private final Map<UUID, Integer> failures = new ConcurrentHashMap<>();
     private final ExecutorService hashing = Executors.newFixedThreadPool(1, runnable -> {
         var thread = new Thread(runnable, "SAM cuenta");
         thread.setDaemon(true);
@@ -87,12 +104,21 @@ public final class SamAccount {
         PayloadTypeRegistry.playC2S().register(TOTP_CONFIRM, SamPayload.codec(TOTP_CONFIRM, TotpConfirm.MAX_BYTES));
         PayloadTypeRegistry.playC2S().register(TOTP_DISABLE, SamPayload.codec(TOTP_DISABLE, TotpDisable.MAX_BYTES));
         PayloadTypeRegistry.playS2C().register(TOTP_ENROLL, SamPayload.codec(TOTP_ENROLL, MAX_SERVER_MESSAGE));
+        PayloadTypeRegistry.playC2S().register(DATA, SamPayload.codec(DATA, dev.sam.common.proto.account.AccountData.MAX_BYTES));
+        PayloadTypeRegistry.playS2C().register(EXPORT, SamPayload.codec(EXPORT, dev.sam.common.proto.account.AccountExport.MAX_BYTES));
+        // RF-AUTH-07e: exportar o borrar los datos del jugador, con reautenticación
+        ServerPlayNetworking.registerGlobalReceiver(DATA, (payload, context) -> withSetup(context.player(), ready -> {
+            var request = decode(context.player(), payload, dev.sam.common.proto.account.AccountData.MAX_BYTES,
+                dev.sam.common.proto.account.AccountData::read);
+            if (request != null) {
+                data(context.player(), context.server(), ready, request);
+            }
+        }));
         PayloadTypeRegistry.playS2C().register(INFO, SamPayload.codec(INFO, MAX_SERVER_MESSAGE));
         PayloadTypeRegistry.playS2C().register(RESULT, SamPayload.codec(RESULT, MAX_SERVER_MESSAGE));
         PayloadTypeRegistry.playS2C().register(SamAuth.OAUTH_URL, SamPayload.codec(SamAuth.OAUTH_URL, MAX_SERVER_MESSAGE));
 
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
-            failures.remove(handler.getPlayer().getUUID());
             var ready = setup;
             if (ready != null) {
                 ready.google().ifPresent(google -> google.forget(handler.getPlayer().getUUID()));
@@ -124,7 +150,7 @@ public final class SamAccount {
             hashing.execute(() -> {
                 var started = ready.accounts().beginTotp(nick(player), begin.k(), issuer.isBlank() ? "Minecraft" : issuer);
                 context.server().execute(() -> {
-                    if (player.hasDisconnected() || countFailure(player, started.result())) {
+                    if (player.hasDisconnected() || countFailure(player, ready, started.result())) {
                         return;
                     }
                     started.enrollment().ifPresentOrElse(
@@ -199,6 +225,58 @@ public final class SamAccount {
         }
     }
 
+    private void data(ServerPlayer player, MinecraftServer server, Setup ready, dev.sam.common.proto.account.AccountData request) {
+        var nick = nick(player);
+        var uuid = player.getUUID().toString();
+        hashing.execute(() -> {
+            var delete = request.action() == dev.sam.common.proto.account.AccountData.Action.DELETE;
+            var exported = delete ? null : ready.accounts().export(nick, request.k(), request.code());
+            var result = delete ? ready.accounts().delete(nick, request.k(), request.code()) : exported.result();
+            server.execute(() -> {
+                if (player.hasDisconnected() || countFailure(player, ready, result)) {
+                    return;
+                }
+                if (result.status() != AccountResult.Status.OK) {
+                    send(player, RESULT, result::write);
+                    return;
+                }
+                var dataHooks = hooks;
+                if (delete) {
+                    if (dataHooks != null) {
+                        dataHooks.erase(server, nick, uuid);
+                    }
+                    dev.sam.server.SamAudit.event("cuenta.borrada", nick, "", "el jugador borró su cuenta y sus datos");
+                    player.connection.disconnect(Component.literal("Tu cuenta y tus datos se borraron de este servidor. "
+                        + "Si vuelves a entrar, empiezas de cero."));
+                    return;
+                }
+                var account = exported.data().orElseThrow();
+                var json = new com.google.gson.JsonObject();
+                json.addProperty("servidor", SamAuth.serverName(server));
+                json.addProperty("exportado", java.time.Instant.now().toString());
+                var cuenta = new com.google.gson.JsonObject();
+                cuenta.addProperty("nick", account.nick());
+                cuenta.addProperty("correo", account.email());
+                cuenta.addProperty("google", account.google());
+                cuenta.addProperty("dosFactores", account.totp());
+                json.add("cuenta", cuenta);
+                if (dataHooks != null) {
+                    dataHooks.export(nick).forEach(json::add);
+                }
+                // Tope del mensaje: si no cabe, se quitan primero los eventos más viejos de la auditoría
+                var text = json.toString();
+                while (text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > dev.sam.common.proto.account.AccountExport.MAX_JSON
+                        && json.has("auditoria") && json.getAsJsonArray("auditoria").size() > 0) {
+                    json.getAsJsonArray("auditoria").remove(0);
+                    text = json.toString();
+                }
+                dev.sam.server.SamAudit.event("cuenta.exportada", nick, "", "el jugador exportó sus datos");
+                send(player, EXPORT, new dev.sam.common.proto.account.AccountExport(text)::write);
+                send(player, RESULT, result::write);
+            });
+        });
+    }
+
     /** Operación con reautenticación: Argon2 fuera del hilo; los fallos cuentan para SAM-K004. */
     private void withPassword(ServerPlayer player, MinecraftServer server, Setup ready, Supplier<AccountResult> operation, String audit) {
         hashing.execute(() -> {
@@ -211,7 +289,7 @@ public final class SamAccount {
                 if (result.status() == AccountResult.Status.OK) {
                     dev.sam.server.SamAudit.event("cuenta.cambio", nick, "", audit);
                 }
-                if (countFailure(player, result)) {
+                if (countFailure(player, ready, result)) {
                     return;
                 }
                 send(player, RESULT, result::write);
@@ -221,22 +299,38 @@ public final class SamAccount {
     }
 
     /**
-     * Una contraseña o un código equivocados cuentan para SAM-K004; un OK reinicia la cuenta.
+     * Una contraseña o un código equivocados cuentan para el mismo bloqueo que el login (RF-AUTH-06a): al llegar al
+     * tope, SAM-K004 con los minutos que faltan. Un OK limpia los intentos.
      *
      * @return {@code true} si el jugador fue expulsado
      */
-    private boolean countFailure(ServerPlayer player, AccountResult result) {
+    private boolean countFailure(ServerPlayer player, Setup ready, AccountResult result) {
+        var nick = nick(player);
+        var ip = playerIp(player);
         if (result.status() == AccountResult.Status.OK) {
-            failures.remove(player.getUUID());
+            ready.throttle().success(nick, ip);
             return false;
         }
         var wrong = result.detail().filter(d -> d.equals(AccountService.WRONG_PASSWORD) || d.equals(AccountService.WRONG_CODE));
-        if (wrong.isPresent() && failures.merge(player.getUUID(), 1, Integer::sum) >= SamAuth.MAX_ATTEMPTS) {
-            dev.sam.server.SamAudit.event("cuenta.expulsado", nick(player), "", LoginFlow.KICK_TOO_MANY);
-            player.connection.disconnect(Component.literal(LoginFlow.KICK_TOO_MANY));
+        if (wrong.isEmpty()) {
+            return false;
+        }
+        dev.sam.server.SamAudit.event("cuenta.fallido", nick, ip, wrong.get());
+        var locked = ready.throttle().failure(nick, ip);
+        if (locked.isPresent()) {
+            var kick = LoginFlow.lockedKick(ready.throttle().remaining(locked.get()));
+            dev.sam.server.SamAudit.event("cuenta.expulsado", nick, ip, kick);
+            player.connection.disconnect(Component.literal(kick));
             return true;
         }
         return false;
+    }
+
+    private static String playerIp(ServerPlayer player) {
+        var connection = ((dev.sam.server.mixin.ServerCommonPacketListenerAccessor) player.connection).sam$connection();
+        var channel = ((dev.sam.server.mixin.ConnectionAccessor) connection).sam$channel();
+        return channel == null ? "desconocida"
+            : dev.sam.common.net.ip.ClientIp.of(channel).map(java.net.InetAddress::getHostAddress).orElse("desconocida");
     }
 
     private void sendInfo(ServerPlayer player, Setup ready) {

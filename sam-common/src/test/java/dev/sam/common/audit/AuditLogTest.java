@@ -232,4 +232,20 @@ class AuditLogTest {
             log.append("evento", "j" + i, "", "");
         }
     }
+
+    @Test
+    void losEventosDeUnActorSinImportarMayusculas() throws Exception {
+        var log = abrir();
+        log.append("login.ok", "Steve", "1.1.1.1", "");
+        log.append("login.ok", "Alex", "2.2.2.2", "");
+        log.append("comando", "steve", "", "gamemode creative");
+        log.append("permisos.cambio", "Steve2", "", "");
+        var lineas = AuditLog.byActor(archivo(), "STEVE");
+        assertThat(lineas).hasSize(2);
+        assertThat(lineas.get(0)).contains("\"seq\":1,");
+        assertThat(lineas.get(1)).contains("gamemode creative");
+        assertThat(AuditLog.byActor(dir.resolve("no-existe"), "steve")).isEmpty();
+        Files.writeString(archivo(), "basura\n", java.nio.file.StandardOpenOption.APPEND);
+        assertThat(AuditLog.byActor(archivo(), "steve")).hasSize(2);
+    }
 }

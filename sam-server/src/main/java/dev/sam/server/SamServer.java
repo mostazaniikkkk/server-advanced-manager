@@ -123,6 +123,30 @@ public final class SamServer implements DedicatedServerModInitializer {
             FabricLoader.getInstance().getConfigDir().resolve("sam/permissions.json"), config, AUTH::verified));
         permissions.ifPresent(p -> SamAuditCommands.install(p::sensitiveAllowed));
         permissions.ifPresent(p -> AUTH.admins(p::isAdmin));
+        // RF-AUTH-07e: exportar y borrar incluye los permisos, la auditoría y los datos de los scripts
+        var dataHooks = new SamAccount.DataHooks() {
+            @Override
+            public Map<String, com.google.gson.JsonElement> export(String nick) {
+                var extra = new java.util.LinkedHashMap<String, com.google.gson.JsonElement>();
+                permissions.flatMap(p -> p.userJson(nick)).ifPresent(json -> extra.put("permisos", com.google.gson.JsonParser.parseString(json)));
+                var audit = new com.google.gson.JsonArray();
+                try {
+                    dev.sam.common.audit.AuditLog.byActor(SamAudit.file(), nick).forEach(line -> audit.add(com.google.gson.JsonParser.parseString(line)));
+                } catch (IOException e) {
+                    LOGGER.warn("No se pudo leer la auditoría para exportar los datos de {}: {}", nick, e.getMessage());
+                }
+                extra.put("auditoria", audit);
+                return extra;
+            }
+
+            @Override
+            public void erase(net.minecraft.server.MinecraftServer server, String nick, String uuid) {
+                permissions.ifPresent(p -> p.eraseUser(nick));
+                scripts.ifPresent(s -> s.erase(server, nick, uuid));
+            }
+        };
+        ACCOUNT.hooks(dataHooks);
+        AUTH.erase(dataHooks);
         net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.DISCONNECT.register((handler, s) ->
             AUTH.forget(handler.getPlayer().getGameProfile().getName()));
         // RF-ADM-05a (H-04): cada 20 s, las sesiones verificadas que vencieron y las sesiones que llegaron a su máximo
@@ -255,7 +279,7 @@ public final class SamServer implements DedicatedServerModInitializer {
             var throttle = new dev.sam.common.auth.LoginThrottle(dev.sam.common.auth.LoginThrottle.Limits.fromConfig(config),
                 java.time.InstantSource.system());
             AUTH.activate(new SamAuth.Setup(accounts, serverId, policy, google, throttle));
-            ACCOUNT.activate(new SamAccount.Setup(accounts, google));
+            ACCOUNT.activate(new SamAccount.Setup(accounts, google, throttle));
             LOGGER.info("Login de SAM abierto: contraseña{}; {} cuentas en {}",
                 google.map(g -> " y Google (client_id " + g.clientId() + ")").orElse(""), AccountsFile.load(file, fields).size(), file);
             ROTATE.set(accounts);

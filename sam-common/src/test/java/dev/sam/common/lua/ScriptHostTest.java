@@ -87,6 +87,15 @@ class ScriptHostTest {
     }
 
     @Test
+    void elBorradoDeUnJugadorLlegaComoErase() {
+        host.load(List.of(script("homes", """
+            sam.on('erase', function(p) sam.log('borro ' .. p.name) end)
+            """, "events")));
+        host.fire(ScriptHost.Event.ERASE, STEVE, Optional.empty());
+        assertThat(servidor.log).containsExactly("homes: borro Steve");
+    }
+
+    @Test
     void elSchedulerCuentaTicksYSePuedeCancelar() {
         host.load(List.of(script("reloj", """
             n = 0

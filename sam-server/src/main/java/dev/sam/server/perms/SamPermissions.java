@@ -197,6 +197,23 @@ public final class SamPermissions {
         apply(expiry.set());
     }
 
+    /** RF-AUTH-07e: la entrada de permisos del jugador, para exportar sus datos. */
+    public synchronized Optional<String> userJson(String nick) {
+        return active.flatMap(set -> set.userJson(nick));
+    }
+
+    /** RF-AUTH-07e: borra la entrada de permisos del jugador (al borrar su cuenta). */
+    public synchronized void eraseUser(String nick) {
+        active.ifPresent(set -> {
+            var after = set.withoutUser(nick);
+            if (!after.equals(set)) {
+                apply(after);
+                dev.sam.server.SamAudit.event("permisos.cambio", "SAM", "", "borrado de datos de " + nick + " | "
+                    + PermissionSet.diff(set, after));
+            }
+        });
+    }
+
     private void apply(PermissionSet set) {
         try {
             save(set);

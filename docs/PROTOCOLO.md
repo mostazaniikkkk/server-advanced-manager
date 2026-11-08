@@ -483,6 +483,8 @@ C → S  sam:totp_begin          k: bytes[32]                                (RF
 S → C  sam:totp_enroll         secret_uri: String ≤ 512 (otpauth://), backup_codes: List<String ≤ 16> = 10
 C → S  sam:totp_confirm        code: String ≤ 16                           (el primer código lo activa)
 C → S  sam:totp_disable        k: bytes[32], code: String ≤ 16
+C → S  sam:account_data        action: enum { EXPORT, DELETE }, k: bytes[32], code: Optional<String ≤ 16>  (RF-AUTH-07c)
+S → C  sam:account_export      json: String ≤ 64 KiB     (respuesta a EXPORT; DELETE desconecta con un aviso)
 S → C  sam:account_result      status: enum { OK, FAILED, LOCKED }, detail: Optional<String ≤ 128>
                                (después de cada operación llega un account_info nuevo)
 ```
@@ -504,7 +506,7 @@ S → C  sam:media_failed    ref: bytes ≤ 16 (4 bytes big-endian = número de 
 
 `sam:lua_msg` une la parte de cliente y la de servidor de **un mismo script** (`"side": "both"`, capacidad `messages` en el manifest): el servidor solo acepta mensajes de un script que ese jugador aceptó y que corre en el servidor, y solo le envía a un jugador los de scripts que aceptó; el cliente solo acepta mensajes de un script que tiene cargado. Un mensaje para un script que no cumple eso se descarta (los scripts pueden recargarse en medio). Mal formado → `SAM-P001`. Tope en el servidor por jugador y script: 20 mensajes por segundo (ráfaga de 40); los que se pasan se descartan con un aviso en el log.
 
-Con el 2FA activo, `account_email`, `account_unlink` y `totp_disable` exigen el código además de `k`. Los fallos de contraseña o de código en play cuentan para el mismo tope que en el login (SAM-K004).
+Con el 2FA activo, `account_email`, `account_unlink`, `totp_disable` y `account_data` exigen el código además de `k`. Los fallos de contraseña o de código en play cuentan para el mismo bloqueo que el login (`LoginThrottle`, RF-AUTH-06a): al llegar al tope, kick con `SAM-K004` y los minutos que faltan.
 | `sam:lua_msg` | ambos | Canal de un script: `script: String ≤ 32`, `channel: String ≤ 32`, `data: bytes ≤ 4000` (un `LuaData`, 8.5) |
 | `sam:notice` | S → C | Avisos (actualización disponible para admins, alerta del trust store) |
 

@@ -356,7 +356,9 @@ public final class ScriptHost {
     }
 
     public enum Event {
-        JOIN, QUIT, CHAT;
+        JOIN, QUIT, CHAT,
+        /** El jugador borró su cuenta (RF-AUTH-07e): cada script borra lo suyo. */
+        ERASE;
 
         String luaName() {
             return name().toLowerCase(Locale.ROOT);

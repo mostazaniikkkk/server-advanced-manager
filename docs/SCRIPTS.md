@@ -107,6 +107,10 @@ Las imágenes van dentro de la carpeta del script (por ejemplo `assets/icono.png
 
 Mientras el jugador tiene abierta una pantalla de SAM (inicio de sesión, cuenta, 2FA, consentimiento), los scripts de cliente no reciben nada.
 
+### Borrado de datos de un jugador (servidor)
+
+Cuando un jugador borra su cuenta (o la consola usa `sam auth reset`), los scripts de servidor con la capacidad `events` reciben `sam.on("erase", function(nick) ... end)`: cada plugin borra lo que guardó de ese jugador (RF-AUTH-07e).
+
 ### Guardar datos (servidor)
 
 Con la capacidad `storage`, un script de servidor guarda datos que sobreviven a reinicios: `sam.store.set("puntos:steve", 10)`, `sam.store.get("puntos:steve")`, `sam.store.keys()`. Hasta 1024 claves y 256 KiB por script. SAM los guarda en `<mundo>/sam/scripts/<id>.dat`; hazle copia de seguridad junto con el mundo.

@@ -103,6 +103,12 @@ public final class SamAuth {
     }
     /** Quién es admin (RF-ADM-03a); lo define SamServer con los permisos. Sin definir, nadie. */
     private volatile java.util.function.BiPredicate<MinecraftServer, com.mojang.authlib.GameProfile> admins = (s, p) -> false;
+    /** RF-AUTH-07e: lo que se borra además de la cuenta (permisos, scripts) en {@code sam auth reset}. */
+    private volatile SamAccount.DataHooks erase;
+
+    public void erase(SamAccount.DataHooks hooks) {
+        erase = hooks;
+    }
 
     public void admins(java.util.function.BiPredicate<MinecraftServer, com.mojang.authlib.GameProfile> check) {
         admins = check;
@@ -183,8 +189,13 @@ public final class SamAuth {
             return 0;
         }
         forget(nick);
-        dev.sam.server.SamAudit.event("cuenta.reset", "consola", "", nick + ": se borró contraseña, correo, 2FA y Google");
         var online = source.getServer().getPlayerList().getPlayerByName(nick);
+        var hooks = erase;
+        if (hooks != null) {
+            hooks.erase(source.getServer(), nick, online == null ? "" : online.getUUID().toString());
+        }
+        dev.sam.server.SamAudit.event("cuenta.reset", "consola", "", nick + ": se borró contraseña, correo, 2FA, Google, sus "
+            + "permisos y los datos de los scripts");
         if (online != null) {
             online.connection.disconnect(Component.literal("Tu cuenta se reinició. Vuelve a entrar para crearla de nuevo."));
         }

@@ -245,6 +245,11 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
     }
 
     /** Encola el evento para el próximo tick del hilo del servidor (nunca corre en el acto ni en otro hilo). */
+    /** RF-AUTH-07e: avisa a los scripts que ese jugador borró su cuenta, para que borren lo suyo. */
+    public void erase(MinecraftServer s, String nick, String uuid) {
+        later(s, ScriptHost.Event.ERASE, new ScriptHost.Player(nick, uuid), Optional.empty());
+    }
+
     private void later(MinecraftServer s, ScriptHost.Event event, ScriptHost.Player who, Optional<String> text) {
         s.tell(new net.minecraft.server.TickTask(s.getTickCount(), () -> host.fire(event, who, text)));
     }

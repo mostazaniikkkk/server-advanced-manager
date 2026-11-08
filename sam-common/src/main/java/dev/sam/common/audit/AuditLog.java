@@ -125,6 +125,17 @@ public final class AuditLog {
         return List.copyOf(lines.subList(Math.max(0, lines.size() - Math.max(0, n)), lines.size()));
     }
 
+    /** RF-AUTH-07e: las líneas de ese actor (sin importar mayúsculas), para exportar los datos de un jugador. */
+    public static List<String> byActor(Path file, String actor) throws IOException {
+        return read(file).stream().filter(line -> {
+            try {
+                return JsonParser.parseString(line).getAsJsonObject().get("actor").getAsString().equalsIgnoreCase(actor);
+            } catch (RuntimeException e) {
+                return false;
+            }
+        }).toList();
+    }
+
     /** Copia solo del dueño al lado, con la fecha UTC en el nombre. */
     public static Path export(Path file, Instant now) throws IOException {
         var copy = file.resolveSibling(EXPORT_NAME.format(now));

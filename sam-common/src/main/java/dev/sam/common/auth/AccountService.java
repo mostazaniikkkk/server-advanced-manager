@@ -319,6 +319,44 @@ public final class AccountService {
         return accounts.values().stream().filter(a -> a.googleSub().filter(sub::equals).isPresent()).map(Account::nick).findFirst();
     }
 
+    /** Lo que se exporta de la cuenta (RF-AUTH-07e): el correo completo, no enmascarado. */
+    public record Export(String nick, String email, boolean google, boolean totp) {
+    }
+
+    public record ExportResult(AccountResult result, Optional<Export> data) {
+    }
+
+    /** Exportar los datos de la cuenta, con la contraseña y, con 2FA, el código (RF-AUTH-07e). */
+    public ExportResult export(String nick, byte[] k, Optional<String> code) {
+        var denied = reauthenticate(nick, k, code);
+        if (denied.isPresent()) {
+            return new ExportResult(denied.get(), Optional.empty());
+        }
+        synchronized (this) {
+            var account = accounts.get(Nick.normalize(nick));
+            return new ExportResult(accountOk(), Optional.of(new Export(account.nick(), account.email(), account.googleSub().isPresent(),
+                account.totp().isPresent())));
+        }
+    }
+
+    /** Borrar la cuenta, con la contraseña y, con 2FA, el código (RF-AUTH-07e). */
+    public AccountResult delete(String nick, byte[] k, Optional<String> code) {
+        var denied = reauthenticate(nick, k, code);
+        if (denied.isPresent()) {
+            return denied.get();
+        }
+        reset(nick);
+        return accountOk();
+    }
+
+    /** La contraseña primero (así un código no se gasta con la contraseña mala) y después el 2FA. */
+    private Optional<AccountResult> reauthenticate(String nick, byte[] k, Optional<String> code) {
+        if (!verified(nick, k)) {
+            return Optional.of(accountFailed(WRONG_PASSWORD));
+        }
+        return secondFactor(nick, code);
+    }
+
     /** {@code steve@example.com} → {@code s***@e***.com} (RS-AUTH-07). */
     static String mask(String email) {
         var at = email.indexOf('@');

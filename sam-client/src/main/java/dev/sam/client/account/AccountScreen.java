@@ -55,6 +55,8 @@ final class AccountScreen extends Screen implements dev.sam.client.ProtectedScre
     private Button changeEmail;
     private Button googleButton;
     private Button totpButton;
+    private Button exportButton;
+    private Button deleteButton;
     /** El código de 2FA: solo se ve si la cuenta lo tiene activo (5.0). */
     private EditBox code;
     private Button toggle;
@@ -111,8 +113,14 @@ final class AccountScreen extends Screen implements dev.sam.client.ProtectedScre
             .bounds(x, top + 127, FIELD_WIDTH / 2 - 2, 20).build());
         totpButton = addRenderableWidget(Button.builder(Component.literal("2FA"), b -> totp())
             .bounds(x + FIELD_WIDTH / 2 + 2, top + 127, FIELD_WIDTH / 2 - 2, 20).build());
+        // RF-AUTH-07e: tus datos (con la contraseña de arriba) y volver, en la última fila
+        var third = (FIELD_WIDTH - 8) / 3;
+        exportButton = addRenderableWidget(Button.builder(Component.literal("Exportar datos"), b -> exportData())
+            .bounds(x, panelTop + PANEL_HEIGHT - 26, third, 20).build());
+        deleteButton = addRenderableWidget(Button.builder(Component.literal("Borrar cuenta"), b -> confirmDelete())
+            .bounds(x + third + 4, panelTop + PANEL_HEIGHT - 26, third, 20).build());
         addRenderableWidget(Button.builder(Component.literal("Volver"), b -> onClose())
-            .bounds(x, panelTop + PANEL_HEIGHT - 26, FIELD_WIDTH, 20).build());
+            .bounds(x + 2 * (third + 4), panelTop + PANEL_HEIGHT - 26, FIELD_WIDTH - 2 * (third + 4), 20).build());
         if (info == null) {
             SamClientAccount.send(SamClientAccount.REQUEST, w -> { });
         }
@@ -165,6 +173,37 @@ final class AccountScreen extends Screen implements dev.sam.client.ProtectedScre
         totpButton.setWidth(googleButton.visible ? FIELD_WIDTH / 2 - 2 : FIELD_WIDTH);
         totpButton.setMessage(Component.literal(totpOn ? "Desactivar 2FA" : "Activar 2FA"));
         totpButton.active = loaded && !busy && (totpOn ? credentials : hasPassword);
+        exportButton.active = loaded && !busy && credentials;
+        deleteButton.active = loaded && !busy && credentials;
+    }
+
+    /** RF-AUTH-07e: pide tus datos al servidor (con la contraseña y el código); llegan como un archivo. */
+    private void exportData() {
+        var second = secondFactor();
+        withKey(k -> SamClientAccount.send(SamClientAccount.DATA,
+            new dev.sam.common.proto.account.AccountData(dev.sam.common.proto.account.AccountData.Action.EXPORT, k, second)::write),
+            "Preparando tus datos");
+    }
+
+    /** RF-AUTH-07e: borrar la cuenta pide confirmación; no se puede deshacer. */
+    private void confirmDelete() {
+        minecraft.setScreen(new net.minecraft.client.gui.screens.ConfirmScreen(yes -> {
+            minecraft.setScreen(this);
+            if (yes) {
+                var second = secondFactor();
+                withKey(k -> SamClientAccount.send(SamClientAccount.DATA,
+                    new dev.sam.common.proto.account.AccountData(dev.sam.common.proto.account.AccountData.Action.DELETE, k, second)::write),
+                    "Borrando tu cuenta");
+            }
+        }, Component.literal("¿Borrar tu cuenta en este servidor?"),
+            Component.literal("Se borran tu contraseña, tu correo, el 2FA, Google, tus permisos y lo que guardaron los "
+                + "plugins (por ejemplo tus homes). No se puede deshacer."),
+            Component.literal("Sí, borrar todo"), Component.literal("Cancelar")));
+    }
+
+    /** Llegó el archivo con tus datos. */
+    void onExported(java.nio.file.Path file) {
+        setStatus("Tus datos están en " + file.getFileName(), GREEN);
     }
 
     private void applyMask() {
@@ -276,6 +315,21 @@ final class AccountScreen extends Screen implements dev.sam.client.ProtectedScre
                     }
                 });
             });
+    }
+
+    /** Solo para el gancho de desarrollo: exportar o borrar con la contraseña (y el código del archivo de TOTP). */
+    void devData(boolean delete, String devPassword) {
+        password.setValue(devPassword);
+        var file = System.getProperty("sam.dev.totpFile");
+        if (file != null && info != null && info.totp() == AccountInfo.Totp.ON) {
+            dev.sam.client.auth.DevTotp.code(java.nio.file.Path.of(file)).ifPresent(code::setValue);
+        }
+        refresh();
+        if (delete) {
+            confirmDelete();
+        } else if (exportButton.active) {
+            exportData();
+        }
     }
 
     /** Solo para el gancho de desarrollo de {@link SamClientAccount#devHook}. */
