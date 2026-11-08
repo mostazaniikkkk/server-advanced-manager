@@ -93,7 +93,9 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
      * Registra todo (una vez, al iniciar el mod, después del login), salvo que {@value #ENABLED} sea
      * {@code false}.
      */
-    public static Optional<SamScripts> install(Logger log, Path keys, Map<String, String> config, Optional<Path> dataDir) {
+    /** @param sensitive quién puede administrar los scripts (RS-ADM-01, H-05): consola o admin verificado */
+    public static Optional<SamScripts> install(Logger log, Path keys, Map<String, String> config, Optional<Path> dataDir,
+            java.util.function.Predicate<net.minecraft.commands.CommandSourceStack> sensitive) {
         if (config.getOrDefault(ENABLED, "true").strip().equalsIgnoreCase("false")) {
             log.info("Scripts de SAM desactivados ({}=false)", ENABLED);
             return Optional.empty();
@@ -150,7 +152,7 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) ->
             scripts.later(sender.server, ScriptHost.Event.CHAT, player(sender), Optional.of(message.signedContent())));
         CommandRegistrationCallback.EVENT.register((dispatcher, registry, environment) -> dispatcher.register(Commands.literal("sam")
-            .then(Commands.literal("scripts").requires(source -> source.hasPermission(4))
+            .then(Commands.literal("scripts").requires(sensitive)
                 .then(Commands.literal("list").executes(c -> scripts.list(c.getSource())))
                 .then(Commands.literal("reload").executes(c -> scripts.reloadCommand(c.getSource())))
                 .then(Commands.literal("errors").then(Commands.argument("script", StringArgumentType.word())

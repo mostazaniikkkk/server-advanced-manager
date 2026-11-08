@@ -88,8 +88,19 @@ public final class SamAuth {
     private final Map<ServerConfigurationPacketListenerImpl, String> pendingIps = new ConcurrentHashMap<>();
     private final ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor(daemon("SAM auth timeout"));
     private volatile Setup setup;
-    /** Los nicks que completaron el 2FA en su sesión actual (RF-ADM-04, nodos {@code verified} de RF-PERM-06). */
-    private final Set<String> verified = ConcurrentHashMap.newKeySet();
+    /**
+     * Las sesiones de juego (RF-ADM-04, RF-ADM-05a): quién completó el 2FA y hasta cuándo vale; lo define
+     * SamServer con el .env.
+     */
+    private volatile dev.sam.common.auth.SessionClock sessions = dev.sam.common.auth.SessionClock.fromConfig(Map.of());
+
+    public void sessions(dev.sam.common.auth.SessionClock clock) {
+        sessions = clock;
+    }
+
+    public dev.sam.common.auth.SessionClock sessions() {
+        return sessions;
+    }
     /** Quién es admin (RF-ADM-03a); lo define SamServer con los permisos. Sin definir, nadie. */
     private volatile java.util.function.BiPredicate<MinecraftServer, com.mojang.authlib.GameProfile> admins = (s, p) -> false;
 
@@ -183,12 +194,12 @@ public final class SamAuth {
 
     /** Si ese jugador completó el 2FA al entrar en esta sesión. */
     public boolean verified(String nick) {
-        return verified.contains(nick.toLowerCase(java.util.Locale.ROOT));
+        return sessions.verified(nick, java.time.Instant.now());
     }
 
     /** Al salir, la sesión verificada termina. */
     public void forget(String nick) {
-        verified.remove(nick.toLowerCase(java.util.Locale.ROOT));
+        sessions.forget(nick);
     }
 
     private void configure(ServerConfigurationPacketListenerImpl handler, MinecraftServer server) {
@@ -377,9 +388,7 @@ public final class SamAuth {
         } else if (reply.done()) {
             // El flujo solo termina después del código si la cuenta tiene 2FA (5.0)
             var withTotp = setup != null && setup.accounts().hasTotp(nick);
-            if (withTotp) {
-                verified.add(nick.toLowerCase(java.util.Locale.ROOT));
-            }
+            sessions.start(nick, withTotp, java.time.Instant.now());
             dev.sam.server.SamAudit.event("login.ok", nick, pendingIps.getOrDefault(handler, ""),
                 withTotp ? "con 2FA: sesión verificada" : "sin 2FA");
             flows.remove(handler);

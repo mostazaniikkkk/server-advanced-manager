@@ -319,6 +319,16 @@ public final class SamPermissions {
         PermissionSet after;
         try {
             after = change.apply(before);
+            // H-07: un admin en el juego no puede cambiar lo que le aplica a él mismo (otro admin o la consola sí)
+            var player = source.getPlayer();
+            if (player != null && PermissionSet.affects(before, after, player.getGameProfile().getName(),
+                    java.time.Instant.now().getEpochSecond())) {
+                dev.sam.server.SamAudit.event("permisos.rechazado", source.getTextName(), "", "intentó cambiar sus propios permisos: "
+                    + description);
+                source.sendFailure(Component.literal("No puedes cambiar permisos que te aplican a ti mismo: pídeselo a otro admin "
+                    + "o hazlo desde la consola."));
+                return 0;
+            }
             apply(after);
         } catch (IllegalArgumentException | IllegalStateException e) {
             source.sendFailure(Component.literal("No se cambió: " + e.getMessage()));

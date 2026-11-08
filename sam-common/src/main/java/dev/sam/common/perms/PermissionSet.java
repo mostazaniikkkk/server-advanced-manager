@@ -520,6 +520,20 @@ public record PermissionSet(Map<String, Group> groups, Map<String, User> users) 
     // ===== Cambios (/sam perms, docs/PERMISOS.md sección 4) =====
     // Cada cambio arma el conjunto nuevo y lo pasa por la misma lectura estricta que el archivo.
 
+    /**
+     * H-07 (separación de funciones): si el cambio toca a ese jugador, en su entrada o en un grupo que le aplica
+     * (directo vigente, heredado o {@code default}), antes o después del cambio.
+     */
+    public static boolean affects(PermissionSet before, PermissionSet after, String nick, long now) {
+        var key = nick.toLowerCase(java.util.Locale.ROOT);
+        if (!Objects.equals(before.users().get(key), after.users().get(key))) {
+            return true;
+        }
+        var mine = new HashSet<>(before.groupsOf(before.users().get(key), now));
+        mine.addAll(after.groupsOf(after.users().get(key), now));
+        return mine.stream().anyMatch(group -> !Objects.equals(before.groups().get(group), after.groups().get(group)));
+    }
+
     /** H-09: qué cambió entre dos estados, entidad por entidad ("grupo x: antes -> después; ..."), en una línea. */
     public static String diff(PermissionSet before, PermissionSet after) {
         var changes = new ArrayList<String>();

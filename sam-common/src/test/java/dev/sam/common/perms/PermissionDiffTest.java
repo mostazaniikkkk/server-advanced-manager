@@ -47,4 +47,35 @@ class PermissionDiffTest {
         assertThat(diff.split("; ")[1]).startsWith("grupo vip: ");
         assertThat(diff.split("; ")[2]).startsWith("jugador steve: (no existía) -> {");
     }
+
+    // ===== Separación de funciones (H-07): qué cambios tocan al propio admin =====
+
+    private static final long AHORA = 1_000_000L;
+
+    @Test
+    void cambiarseASiMismoLoAfecta() {
+        var antes = PermissionSet.empty().createGroup("staff", 1);
+        assertThat(PermissionSet.affects(antes, antes.addUserGroup("steve", "staff", OptionalLong.empty()), "Steve", AHORA)).isTrue();
+        assertThat(PermissionSet.affects(antes, antes.setUserPermission("steve", "*", SI), "steve", AHORA)).isTrue();
+        assertThat(PermissionSet.affects(antes, antes.setUserPermission("alex", "*", SI), "steve", AHORA)).isFalse();
+    }
+
+    @Test
+    void cambiarUnGrupoSuyoOUnAncestroLoAfecta() {
+        var antes = PermissionSet.empty().createGroup("base", 0).createGroup("staff", 1).addParent("staff", "base")
+            .createGroup("vip", 2).addUserGroup("steve", "staff", OptionalLong.empty());
+        assertThat(PermissionSet.affects(antes, antes.setGroupPermission("staff", "*", SI), "steve", AHORA)).isTrue();
+        assertThat(PermissionSet.affects(antes, antes.setGroupPermission("base", "*", SI), "steve", AHORA)).isTrue();
+        assertThat(PermissionSet.affects(antes, antes.setGroupPermission("default", "*", SI), "steve", AHORA)).isTrue();
+        assertThat(PermissionSet.affects(antes, antes.setGroupPermission("vip", "*", SI), "steve", AHORA)).isFalse();
+        // Hacer que un grupo ajeno herede de... no lo toca; hacer que el suyo herede de otro sí
+        assertThat(PermissionSet.affects(antes, antes.addParent("vip", "base"), "steve", AHORA)).isFalse();
+        assertThat(PermissionSet.affects(antes, antes.addParent("staff", "vip"), "steve", AHORA)).isTrue();
+    }
+
+    @Test
+    void unGrupoVencidoYaNoLoAfecta() {
+        var antes = PermissionSet.empty().createGroup("temporal", 0).addUserGroup("steve", "temporal", OptionalLong.of(AHORA - 1));
+        assertThat(PermissionSet.affects(antes, antes.setGroupPermission("temporal", "*", SI), "steve", AHORA)).isFalse();
+    }
 }

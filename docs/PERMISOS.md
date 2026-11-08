@@ -94,3 +94,7 @@ El archivo se puede editar a mano y recargar con `/sam perms reload`. **Si al ar
 - `sam.meta(jugador, clave)` → texto o `nil`.
 
 Ambas solo leen y valen para jugadores en línea (por nick); para uno desconectado devuelven `false` o `nil`. Un comando de script puede exigir un nodo: `sam.command(nombre, fn, {node = "miscript.usar"})`. Si el permiso queda **indefinido** para quien lo ejecuta, decide el nivel de OP `permission`, que **con `node` vale 2 por defecto** (operadores; la consola siempre puede). Así un nodo que nadie concedió no deja entrar a todos. Para que lo indefinido sea "todos", se pasa `permission = 0` a propósito. Sin `node`, manda `permission` como antes (por defecto 0).
+
+## Separación de funciones (H-07)
+
+Un admin verificado en el juego **no puede** cambiar permisos que le aplican a él mismo: su propia entrada, ni un grupo que tiene (directo vigente, heredado o `default`). El cambio se rechaza y queda en la auditoría (`permisos.rechazado`). Lo puede hacer otro admin o la consola.

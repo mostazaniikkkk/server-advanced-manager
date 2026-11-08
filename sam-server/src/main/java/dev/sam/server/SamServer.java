@@ -124,6 +124,30 @@ public final class SamServer implements DedicatedServerModInitializer {
         permissions.ifPresent(p -> AUTH.admins(p::isAdmin));
         net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.DISCONNECT.register((handler, s) ->
             AUTH.forget(handler.getPlayer().getGameProfile().getName()));
+        // RF-ADM-05a (H-04): cada 20 s, las sesiones verificadas que vencieron y las sesiones que llegaron a su máximo
+        net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(s -> {
+            if (s.getTickCount() % 400 != 0) {
+                return;
+            }
+            var now = java.time.Instant.now();
+            for (var nick : AUTH.sessions().adminExpired(now)) {
+                var player = s.getPlayerList().getPlayerByName(nick);
+                SamAudit.event("sesion.admin.vencida", nick, "", "la sesión verificada venció: sin poderes de OP hasta volver a entrar");
+                if (player != null) {
+                    s.getPlayerList().sendPlayerPermissionLevel(player);
+                    player.sendSystemMessage(net.minecraft.network.chat.Component.literal("Tu sesión de admin venció: tus permisos "
+                        + "de OP se apagaron. Vuelve a entrar para recuperarlos.").withStyle(net.minecraft.ChatFormatting.GOLD));
+                }
+            }
+            for (var nick : AUTH.sessions().expired(now)) {
+                var player = s.getPlayerList().getPlayerByName(nick);
+                SamAudit.event("sesion.vencida", nick, "", "la sesión llegó a su máximo: desconectado");
+                if (player != null) {
+                    player.connection.disconnect(net.minecraft.network.chat.Component.literal(
+                        "Tu sesión venció. Vuelve a entrar e inicia sesión de nuevo."));
+                }
+            }
+        });
         // RF-ADM-03/04 (H-01, H-02): un OP sin 2FA entra como jugador normal y se le dice cómo activar sus permisos
         net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.JOIN.register((handler, sender, s) -> {
             var profile = handler.getPlayer().getGameProfile();
@@ -134,8 +158,9 @@ public final class SamServer implements DedicatedServerModInitializer {
                     + "\"Opciones de cuenta\", y vuelve a entrar.").withStyle(net.minecraft.ChatFormatting.GOLD));
             }
         });
+        var sensitive = permissions.get();
         scripts = dev.sam.server.scripts.SamScripts.install(LOGGER, FabricLoader.getInstance().getConfigDir().resolve("sam/keys"), config,
-            Optional.ofNullable(scriptData));
+            Optional.ofNullable(scriptData), sensitive::sensitiveAllowed);
         // Los límites aplican aunque el login de SAM quede cerrado: el vanilla también pasa por la compuerta
         ingress = new Ingress(ingress.policy(), ingress.routes(), transport.guard());
         loadIdentity(transport, config);
@@ -222,6 +247,7 @@ public final class SamServer implements DedicatedServerModInitializer {
                         throw new UncheckedIOException("No se pudieron guardar las cuentas en " + file, e);
                     }
                 }, dataVault(config), java.time.Clock.systemUTC());
+            AUTH.sessions(dev.sam.common.auth.SessionClock.fromConfig(config));
             var throttle = new dev.sam.common.auth.LoginThrottle(dev.sam.common.auth.LoginThrottle.Limits.fromConfig(config),
                 java.time.InstantSource.system());
             AUTH.activate(new SamAuth.Setup(accounts, serverId, policy, google, throttle));

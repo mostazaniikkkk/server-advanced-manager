@@ -36,10 +36,10 @@ Las brechas marcadas **[operador]** tocan el equipo o el servidor del operador. 
 | H-01 | ✅ | **Cerrada 2026-11-08** (mixin sobre `getProfilePermissions`, RF-ADM-04): el nivel de OP solo vale con el 2FA completado en la sesión; si no, nivel 0. Verificado en un clon: un OP sin 2FA no puede usar `/gamemode`, uno con 2FA sí
 | H-02 | ✅ | **Cerrada 2026-11-08** (RF-ADM-03a): un admin (ops ≥ `SAM_ADMIN_OP_LEVEL` o `sam.admin`) sin TOTP recibe `NEED_ENROLL` y la pantalla "Activar 2FA" en el login; el primer código válido lo activa y entra con la sesión verificada. Verificado en un clon (enrolamiento, login verificado y `/gamemode`)
 | H-03 | ✅ | **Cerrada 2026-11-08** (`LoginThrottle`, RF-AUTH-06a): bloqueo exponencial por (cuenta, IP) que sobrevive a la reconexión, global de cuenta más suave, logins pendientes por IP y globales, cola de Argon2 de 64 (`SAM-K005`). Verificado en un clon: la segunda conexión se rechaza antes de Argon2. Pendiente: los fallos de contraseña en "Opciones de cuenta" (en juego) todavía usan su propio contador
-| H-04 | P2 | Sin caducidad de sesión ni reautenticación para comandos sensibles (`SAM_POLICY_*_SESSION_TTL`) |
-| H-05 | P2 | `/sam scripts reload` y similares solo piden OP 4, no el criterio de comando sensible (consola o admin verificado) |
+| H-04 | ✅ | **Cerrada 2026-11-08** (RF-ADM-05a, `SessionClock`): la sesión verificada de un admin vence a las `SAM_POLICY_ADMIN_SESSION_TTL` (12 h) y apaga sus poderes con aviso; cualquier sesión dura como mucho `SAM_POLICY_DEFAULT_SESSION_TTL` (7 d). Verificado en un clon con 30 s y 60 s |
+| H-05 | ✅ | **Cerrada 2026-11-08**: todo `/sam scripts` exige el criterio de comando sensible (consola o admin verificado). Verificado en un clon |
 | H-06 | ✅ | **Cerrada 2026-11-08** (RN-45): mínimo 8 por defecto (NIST SP 800-63B), el cliente rechaza las ~96.000 contraseñas más usadas (lista del NCSC vía SecLists) y las que contienen el nick, con el motivo a la vista. Verificado en pantalla
-| H-07 | P2 | Sin separación de funciones: un admin verificado puede darse `*` a sí mismo, y no existe `SAM_ADMINS` |
+| H-07 | ✅ | **Cerrada 2026-11-08** (PERMISOS.md): un admin en el juego no puede cambiar permisos que le aplican a él (su entrada, sus grupos, los heredados o `default`); se rechaza y se audita. Verificado en un clon |
 
 ### Registro y monitoreo (A.8.15, A.8.16 / CC7.2-7.3)
 
@@ -110,3 +110,7 @@ El estado de cada brecha se actualiza en este documento al cerrarla.
 | H-16 | **Respaldo cifrado con clave propia**: AES-256-GCM con una clave de respaldo que llega como variable de entorno, hash de integridad y un comando de restauración probado |
 | H-18 a H-21 | **GitHub Actions**: build, pruebas, PIT, escaneo de dependencias, SBOM y checksums de release |
 | [operador] | Se pregunta una por una antes de cada cambio en el equipo o el servidor |
+| H-18 a H-21 (push) | Se sube a GitHub al terminar el hardening completo y se verifica que el workflow pase |
+| H-17 | **Riesgo aceptado por el operador**: los respaldos cifrados quedan en el mismo equipo |
+| H-24 | RCON se mantiene solo en 127.0.0.1, con una contraseña nueva larga y `server.properties` solo para el usuario del servidor |
+| H-25, H-26 | **Fuera del alcance**: cómo se usa y se expone el servidor lo decide el operador |
