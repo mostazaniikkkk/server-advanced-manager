@@ -162,6 +162,7 @@ Se valida en la fase 0: los timeouts de keep-alive mientras el jugador escribe o
 | RF-ADM-04 | **Privilegios condicionados** (RN-13): los permisos de OP y admin solo se activan cuando el 2FA se completó en esa sesión. SAM aplica mixins sobre el nivel de permiso vanilla y registra en LuckPerms el contexto **`sam:verified=true`**; la documentación indica asignar los permisos de staff solo bajo ese contexto. |
 | RF-ADM-05 | El "recordar sesión" de los admins tiene un TTL más corto (configurable) y siempre exige TOTP al entrar desde un dispositivo nuevo. |
 | RF-ADM-06 | Auditoría reforzada: cada login de admin, cada cambio en la lista de admins y cada uso de comandos sensibles (ban, op, gamemode, permisos y otros configurables). |
+| RF-ADM-06a | **Implementación** (H-09 de `docs/HARDENING.md`): cada comando cuya raíz está en `SAM_AUDIT_COMMANDS` (también tras `execute ... run`) va a la auditoría con quién lo ejecutó y el texto completo, sea de un jugador, la consola o RCON. Cada cambio de `/sam perms` guarda el JSON de la entidad antes y después ("grupo x: antes -> después"). |
 | RF-ADM-07 | Recuperación: los códigos de respaldo son obligatorios al enrolar. Un admin que pierde todo solo puede recuperarse desde la **consola del servidor** (`sam auth reset <jugador>`). |
 | RF-ADM-08 | **Cambio de nick**: un admin que se cambia el nick **pierde el rol**, sin migración automática. Para restaurarlo hay que ejecutar `sam admin add <nuevo_nick>` **desde la consola del servidor** o editar `SAM_ADMINS`. La auditoría registra los intentos de entrada con nicks parecidos al de un admin. |
 
@@ -422,6 +423,7 @@ SAM_POLICY_DEFAULT_SESSION_TTL=7d
 
 # ===== Auditoría y privacidad =====
 SAM_AUDIT_IP_RETENTION=90d
+SAM_AUDIT_COMMANDS=op,deop,ban,ban-ip,pardon,pardon-ip,kick,whitelist,gamemode,give,effect,tp,teleport,kill,clear,stop,save-off   # se auditan (RF-ADM-06), también dentro de execute ... run
 
 # ===== Scripts Lua =====
 SAM_SCRIPTS_ENABLED=true

@@ -1,0 +1,50 @@
+package dev.sam.common.perms;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.util.OptionalLong;
+
+import org.junit.jupiter.api.Test;
+
+/** H-09 / PERMISOS.md: la auditoría de un cambio de permisos guarda el valor anterior y el nuevo. */
+class PermissionDiffTest {
+
+    private static final PermissionSet.Grant SI = new PermissionSet.Grant(true, OptionalLong.empty(), false);
+
+    @Test
+    void sinCambiosNoHayNada() {
+        var set = PermissionSet.empty().createGroup("vip", 5);
+        assertThat(PermissionSet.diff(set, set)).isEmpty();
+    }
+
+    @Test
+    void unGrupoCambiadoMuestraAntesYDespuesEnUnaLinea() {
+        var antes = PermissionSet.empty().createGroup("vip", 5).addUserGroup("alex", "vip", OptionalLong.empty());
+        var despues = antes.setGroupPermission("vip", "sam.homes.vip", SI);
+        var diff = PermissionSet.diff(antes, despues);
+        assertThat(diff).doesNotContain("alex").doesNotContain(";");
+        assertThat(diff).startsWith("grupo vip: {").contains(" -> ").doesNotContain("\n");
+        var partes = diff.split(" -> ");
+        assertThat(partes[0]).doesNotContain("sam.homes.vip").contains("\"weight\":5");
+        assertThat(partes[1]).contains("\"sam.homes.vip\"");
+    }
+
+    @Test
+    void creadosYBorradosDicenQueNoExistian() {
+        var antes = PermissionSet.empty();
+        var creado = antes.createGroup("vip", 0);
+        assertThat(PermissionSet.diff(antes, creado)).startsWith("grupo vip: (no existía) -> {");
+        assertThat(PermissionSet.diff(creado, antes)).startsWith("grupo vip: {").endsWith(" -> (borrado)");
+    }
+
+    @Test
+    void jugadoresYVariosCambiosSeparadosPorPuntoYComa() {
+        var antes = PermissionSet.empty().createGroup("vip", 0).createGroup("staff", 1);
+        var despues = antes.addUserGroup("steve", "vip", OptionalLong.empty()).setWeight("staff", 2).setWeight("vip", 3);
+        var diff = PermissionSet.diff(antes, despues);
+        assertThat(diff.split("; ")).hasSize(3);
+        assertThat(diff.split("; ")[0]).startsWith("grupo staff: ");
+        assertThat(diff.split("; ")[1]).startsWith("grupo vip: ");
+        assertThat(diff.split("; ")[2]).startsWith("jugador steve: (no existía) -> {");
+    }
+}

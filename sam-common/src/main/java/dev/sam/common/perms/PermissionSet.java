@@ -12,6 +12,8 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
+import java.util.TreeSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
@@ -517,6 +519,34 @@ public record PermissionSet(Map<String, Group> groups, Map<String, User> users) 
 
     // ===== Cambios (/sam perms, docs/PERMISOS.md sección 4) =====
     // Cada cambio arma el conjunto nuevo y lo pasa por la misma lectura estricta que el archivo.
+
+    /** H-09: qué cambió entre dos estados, entidad por entidad ("grupo x: antes -> después; ..."), en una línea. */
+    public static String diff(PermissionSet before, PermissionSet after) {
+        var changes = new ArrayList<String>();
+        var groupNames = new TreeSet<>(before.groups().keySet());
+        groupNames.addAll(after.groups().keySet());
+        for (var name : groupNames) {
+            if (!Objects.equals(before.groups().get(name), after.groups().get(name))) {
+                changes.add("grupo " + name + ": " + entity(before, "groups", name, "(no existía)") + " -> "
+                    + entity(after, "groups", name, "(borrado)"));
+            }
+        }
+        var userNames = new TreeSet<>(before.users().keySet());
+        userNames.addAll(after.users().keySet());
+        for (var name : userNames) {
+            if (!Objects.equals(before.users().get(name), after.users().get(name))) {
+                changes.add("jugador " + name + ": " + entity(before, "users", name, "(no existía)") + " -> "
+                    + entity(after, "users", name, "(borrado)"));
+            }
+        }
+        return String.join("; ", changes);
+    }
+
+    /** El JSON compacto de un grupo o un jugador, como se guarda en el archivo. */
+    private static String entity(PermissionSet set, String kind, String name, String missing) {
+        var json = com.google.gson.JsonParser.parseString(set.toJson()).getAsJsonObject().getAsJsonObject(kind).get(name);
+        return json == null ? missing : json.toString();
+    }
 
     public PermissionSet createGroup(String name, int weight) {
         if (groups.containsKey(name)) {

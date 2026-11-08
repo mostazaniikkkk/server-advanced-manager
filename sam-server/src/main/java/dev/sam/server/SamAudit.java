@@ -18,6 +18,20 @@ public final class SamAudit {
     private static volatile Logger logger;
     private static volatile AuditLog chain;
     private static volatile Path file;
+    private static volatile dev.sam.common.audit.SensitiveCommands sensitive =
+        dev.sam.common.audit.SensitiveCommands.fromConfig(java.util.Map.of());
+
+    /** Qué comandos vanilla se auditan ({@code SAM_AUDIT_COMMANDS}). */
+    static void commands(dev.sam.common.audit.SensitiveCommands commands) {
+        sensitive = commands;
+    }
+
+    /** RF-ADM-06a: un comando que acaba de mandar {@code actor}; solo los sensibles quedan registrados. */
+    public static void command(String actor, String command) {
+        if (sensitive.matches(command)) {
+            event("comando", actor, "", command.strip());
+        }
+    }
 
     private SamAudit() {
     }

@@ -103,6 +103,7 @@ public final class SamServer implements DedicatedServerModInitializer {
         try {
             config = loadConfig();
             transport = TransportConfig.from(config);
+            SamAudit.commands(dev.sam.common.audit.SensitiveCommands.fromConfig(config));
         } catch (IllegalArgumentException | IOException e) {
             LOGGER.error("Configuración inválida: {}. El login de SAM queda cerrado.", e.getMessage());
             return;

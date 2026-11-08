@@ -315,13 +315,18 @@ public final class SamPermissions {
             source.sendFailure(Component.literal("El archivo de permisos es inválido: corrígelo y usa /sam perms reload."));
             return 0;
         }
+        var before = active.get();
+        PermissionSet after;
         try {
-            apply(change.apply(active.get()));
+            after = change.apply(before);
+            apply(after);
         } catch (IllegalArgumentException | IllegalStateException e) {
             source.sendFailure(Component.literal("No se cambió: " + e.getMessage()));
             return 0;
         }
-        dev.sam.server.SamAudit.event("permisos.cambio", source.getTextName(), "", description);
+        // H-09: con el valor anterior y el nuevo de lo que cambió
+        dev.sam.server.SamAudit.event("permisos.cambio", source.getTextName(), "",
+            description + " | " + PermissionSet.diff(before, after));
         source.sendSuccess(() -> Component.literal("Listo: " + description), false);
         return 1;
     }
