@@ -136,6 +136,15 @@ public final class SamPermissions {
     // ===== Consultas =====
 
     /** El permiso de un jugador en línea, con su sesión verificada o no. */
+    /**
+     * RF-ADM-02/03a: es admin quien está en ops.json con nivel ≥ SAM_ADMIN_OP_LEVEL o tiene {@code sam.admin}.
+     * Usa la lista de OPs y no el nivel efectivo (que sin 2FA es 0, RF-ADM-04).
+     */
+    public boolean isAdmin(net.minecraft.server.MinecraftServer server, com.mojang.authlib.GameProfile profile) {
+        var op = server.getPlayerList().getOps().get(profile);
+        return op != null && op.getLevel() >= adminOpLevel || check(profile.getName(), "sam.admin") == Value.TRUE;
+    }
+
     public Value check(String nick, String node) {
         return active.map(set -> set.check(nick, node, Instant.now().getEpochSecond(), verifiedSession.test(nick)).value())
             .orElse(Value.UNDEFINED);

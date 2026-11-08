@@ -294,7 +294,51 @@ public final class AuthScreen extends Screen implements dev.sam.client.Protected
             });
     }
 
+    private dev.sam.common.proto.account.TotpEnroll enroll;
+
+    /** RF-ADM-03a: el QR y los códigos llegan justo antes del NEED_ENROLL. */
+    void onEnroll(dev.sam.common.proto.account.TotpEnroll data) {
+        enroll = data;
+    }
+
     void onResult(AuthResult result) {
+        if (result.status() == AuthResult.Status.NEED_ENROLL && enroll != null) {
+            var notice = result.detail().orElse("Activa el 2FA para entrar");
+            var screen = this;
+            minecraft.setScreen(new dev.sam.client.account.TotpEnrollScreen(new dev.sam.client.account.TotpEnrollScreen.Host() {
+                @Override
+                public void send(String code) {
+                    sender.sendPacket(new dev.sam.client.net.SamPayload(dev.sam.client.account.SamClientAccount.TOTP_CONFIRM,
+                        encodeConfirm(code)));
+                }
+
+                @Override
+                public void cancel() {
+                    screen.leave();
+                }
+
+                @Override
+                public void enabled() {
+                    // El servidor completa el login: el mundo se abre solo
+                }
+
+                @Override
+                public void tick() {
+                    screen.tickConnection();
+                }
+
+                @Override
+                public String cancelLabel() {
+                    return "Salir";
+                }
+
+                @Override
+                public String notice() {
+                    return notice + ".";
+                }
+            }, enroll));
+            return;
+        }
         if (result.status() == AuthResult.Status.NEED_TOTP) {
             // La contraseña o Google salieron bien; falta el segundo paso
             totpStep = true;
@@ -500,15 +544,25 @@ public final class AuthScreen extends Screen implements dev.sam.client.Protected
      * {@code -Dsam.dev.screenshot=nombre} guarda una captura de esta pantalla a los
      * {@code sam.dev.screenshotDelay} ticks (30 por defecto) y cierra el juego.
      */
-    @Override
-    public void tick() {
-        super.tick();
-        // Lo mismo que hace la ConnectScreen con la conexión mientras está abierta
+    /** Lo mismo que hace la ConnectScreen con la conexión mientras está abierta. */
+    void tickConnection() {
         if (connection.isConnected()) {
             connection.tick();
         } else {
             connection.handleDisconnection();
         }
+    }
+
+    private static byte[] encodeConfirm(String code) {
+        var buf = io.netty.buffer.Unpooled.buffer();
+        new dev.sam.common.proto.account.TotpConfirm(code).write(new dev.sam.common.proto.SamWriter(buf));
+        return io.netty.buffer.ByteBufUtil.getBytes(buf);
+    }
+
+    @Override
+    public void tick() {
+        super.tick();
+        tickConnection();
         ticks++;
         // {@code -Dsam.dev.leave=true}: pulsa Salir a los 20 ticks (prueba de punta a punta)
         if (isDev() && Boolean.getBoolean("sam.dev.leave") && ticks == 20) {

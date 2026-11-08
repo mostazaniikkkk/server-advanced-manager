@@ -42,10 +42,17 @@ public final class LoginFlow {
      * @param kick mensaje de desconexión, si hay que expulsar
      * @param done {@code true} si el login terminó bien: el jugador pasa a jugar
      */
-    public record Reply(Optional<AuthResult> result, Optional<String> kick, boolean done) {
+    public record Reply(Optional<AuthResult> result, Optional<String> kick, boolean done,
+            Optional<AccountService.Enrollment> enroll) {
+
+        public Reply(Optional<AuthResult> result, Optional<String> kick, boolean done) {
+            this(result, kick, done, Optional.empty());
+        }
     }
 
-    private enum State { NEW, HELLO_SENT, AUTH, TOTP, DONE, CLOSED }
+    public static final String ENROLL_REQUIRED = "Eres admin en este servidor: activa el 2FA para entrar";
+
+    private enum State { NEW, HELLO_SENT, AUTH, TOTP, ENROLL, DONE, CLOSED }
 
     private final String nick;
     private final ServerId serverId;
@@ -54,6 +61,7 @@ public final class LoginFlow {
     private final AccountService accounts;
     private final int maxAttempts;
     private final LoginThrottle throttle;
+    private final java.util.function.Predicate<String> admin;
     private final String ip;
     private State state = State.NEW;
     private int failures;
@@ -61,9 +69,11 @@ public final class LoginFlow {
     /**
      * @param throttle los intentos entre conexiones (RF-AUTH-06a): un fallo cuenta para el par (cuenta, IP)
      * @param ip la IP del cliente (RS-WS-02), como texto
+     * @param admin si el nick es admin (RF-ADM-03a): sin TOTP, tiene que enrolarse para entrar
      */
     public LoginFlow(String nick, ServerId serverId, String serverName, AuthPolicyView policy, AccountService accounts,
-            int maxAttempts, LoginThrottle throttle, String ip) {
+            int maxAttempts, LoginThrottle throttle, String ip, java.util.function.Predicate<String> admin) {
+        this.admin = admin;
         this.throttle = throttle;
         this.ip = ip;
         this.nick = nick;
@@ -137,6 +147,16 @@ public final class LoginFlow {
         return failure(failed(checked.detail().orElse(AccountService.WRONG_CODE)));
     }
 
+    /** El primer código de la app de un admin que se está enrolando (RF-ADM-03a): lo activa y entra. */
+    public synchronized Reply onEnrollConfirm(dev.sam.common.proto.account.TotpConfirm confirm) {
+        expect(State.ENROLL);
+        var checked = accounts.confirmTotp(nick, confirm.code());
+        if (checked.status() == AccountResult.Status.OK) {
+            return done(new AuthResult(Status.OK, Optional.empty(), Optional.empty()));
+        }
+        return failure(failed(checked.detail().orElse(AccountService.WRONG_CODE)));
+    }
+
     public synchronized boolean done() {
         return state == State.DONE;
     }
@@ -149,6 +169,14 @@ public final class LoginFlow {
         if (accounts.hasTotp(nick)) {
             state = State.TOTP;
             return new Reply(Optional.of(new AuthResult(Status.NEED_TOTP, Optional.empty(), Optional.empty())), Optional.empty(), false);
+        }
+        if (admin.test(nick)) {
+            var enrollment = accounts.enrollAtLogin(nick, serverName);
+            if (enrollment.isPresent()) {
+                state = State.ENROLL;
+                return new Reply(Optional.of(new AuthResult(Status.NEED_ENROLL, Optional.empty(), Optional.of(ENROLL_REQUIRED))),
+                    Optional.empty(), false, enrollment);
+            }
         }
         return done(result);
     }

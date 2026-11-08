@@ -39,7 +39,7 @@ class LoginFlowTest {
         new LoginThrottle.Limits(1000, java.time.Duration.ofMinutes(15), 1000, 1000), java.time.InstantSource.system());
 
     private LoginFlow flujo(String nick) {
-        return new LoginFlow(nick, ID, "Mi Servidor", POLITICA, cuentas, 3, SIN_BLOQUEO, "9.9.9.9");
+        return new LoginFlow(nick, ID, "Mi Servidor", POLITICA, cuentas, 3, SIN_BLOQUEO, "9.9.9.9", n -> false);
     }
 
     private static LoginFlow.Reply nada() {
@@ -100,7 +100,7 @@ class LoginFlowTest {
     void conDosFALaContrasenaPideElCodigoComoSegundoPaso() {
         var servicio = conBoveda();
         var secreto = conDosFA(servicio);
-        var flujo = new LoginFlow("STEVE", ID, "S", POLITICA, servicio, 3, SIN_BLOQUEO, "9.9.9.9");
+        var flujo = new LoginFlow("STEVE", ID, "S", POLITICA, servicio, 3, SIN_BLOQUEO, "9.9.9.9", n -> false);
         flujo.hello();
         flujo.onHelloAck(ACK);
         assertThat(flujo.onLogin(new LoginPassword(k(1), Optional.empty()))).isEqualTo(necesitaCodigo());
@@ -122,7 +122,7 @@ class LoginFlowTest {
     void conDosFAGoogleTambienPideElCodigo() {
         var servicio = conBoveda();
         var secreto = conDosFA(servicio);
-        var flujo = new LoginFlow("Steve", ID, "S", POLITICA, servicio, 3, SIN_BLOQUEO, "9.9.9.9");
+        var flujo = new LoginFlow("Steve", ID, "S", POLITICA, servicio, 3, SIN_BLOQUEO, "9.9.9.9", n -> false);
         flujo.hello();
         flujo.onHelloAck(ACK);
         fueraDeEstado(() -> flujo.onTotp(new LoginTotp("123456")));
@@ -134,7 +134,7 @@ class LoginFlowTest {
     void losCodigosMalosCuentanParaElTopeDeIntentos() {
         var servicio = conBoveda();
         conDosFA(servicio);
-        var flujo = new LoginFlow("Steve", ID, "S", POLITICA, servicio, 3, SIN_BLOQUEO, "9.9.9.9");
+        var flujo = new LoginFlow("Steve", ID, "S", POLITICA, servicio, 3, SIN_BLOQUEO, "9.9.9.9", n -> false);
         flujo.hello();
         flujo.onHelloAck(ACK);
         flujo.onLogin(new LoginPassword(k(9), Optional.empty()));
@@ -149,7 +149,7 @@ class LoginFlowTest {
     private static final java.time.Instant T0 = java.time.Instant.parse("2026-11-08T12:00:00Z");
 
     private LoginFlow conectar(String nick, LoginThrottle throttle, String ip) {
-        var flujo = new LoginFlow(nick, ID, "S", POLITICA, cuentas, 10, throttle, ip);
+        var flujo = new LoginFlow(nick, ID, "S", POLITICA, cuentas, 10, throttle, ip, n -> false);
         flujo.hello();
         flujo.onHelloAck(ACK);
         return flujo;
@@ -191,6 +191,93 @@ class LoginFlowTest {
         assertThat(LoginFlow.lockedKick(java.time.Duration.ofSeconds(1))).contains("en 1 min.");
         assertThat(LoginFlow.lockedKick(java.time.Duration.ZERO)).contains("en 1 min.");
         assertThat(LoginFlow.lockedKick(java.time.Duration.ofHours(24))).contains("en 1440 min.");
+    }
+
+    // ===== Admin sin 2FA: enrolamiento obligatorio (RF-ADM-03a, H-02) =====
+
+    private LoginFlow admin(AccountService servicio, String nick) {
+        var flujo = new LoginFlow(nick, ID, "Mi Servidor", POLITICA, servicio, 3, SIN_BLOQUEO, "9.9.9.9",
+            n -> n.equalsIgnoreCase("steve"));
+        flujo.hello();
+        flujo.onHelloAck(ACK);
+        return flujo;
+    }
+
+    private static String ahora(byte[] secreto) {
+        var paso = java.time.Instant.now().getEpochSecond() / dev.sam.common.totp.Totp.PERIOD_SECONDS;
+        return dev.sam.common.totp.Totp.code(secreto, paso);
+    }
+
+    @Test
+    void unAdminSinDosFADebeEnrolarseAntesDeEntrar() {
+        var servicio = conBoveda();
+        servicio.register("Steve", k(1), "s@e.com");
+        var flujo = admin(servicio, "Steve");
+        var respuesta = flujo.onLogin(new LoginPassword(k(1), Optional.empty()));
+        assertThat(respuesta.result()).contains(new AuthResult(Status.NEED_ENROLL, Optional.empty(),
+            Optional.of(LoginFlow.ENROLL_REQUIRED)));
+        assertThat(respuesta.done()).isFalse();
+        assertThat(respuesta.kick()).isEmpty();
+        var inscripcion = respuesta.enroll().orElseThrow();
+        assertThat(inscripcion.uri()).startsWith("otpauth://totp/").contains("Mi%20Servidor");
+        assertThat(inscripcion.backupCodes()).hasSize(10);
+        assertThat(flujo.done()).isFalse();
+        // Mientras no confirma, no puede volver a intentar la contraseña
+        fueraDeEstado(() -> flujo.onLogin(new LoginPassword(k(1), Optional.empty())));
+        var secreto = AccountTotpTest.secreto(inscripcion.uri());
+        var malo = flujo.onEnrollConfirm(new dev.sam.common.proto.account.TotpConfirm("000000".equals(ahora(secreto)) ? "111111" : "000000"));
+        assertThat(malo.result().orElseThrow().status()).isEqualTo(Status.FAILED);
+        assertThat(malo.done()).isFalse();
+        var bueno = flujo.onEnrollConfirm(new dev.sam.common.proto.account.TotpConfirm(ahora(secreto)));
+        assertThat(bueno.done()).isTrue();
+        assertThat(bueno.result().orElseThrow().status()).isEqualTo(Status.OK);
+        assertThat(servicio.hasTotp("steve")).isTrue();
+        assertThat(flujo.done()).isTrue();
+    }
+
+    @Test
+    void losCodigosMalosDelEnrolamientoCuentanParaElTope() {
+        var servicio = conBoveda();
+        servicio.register("Steve", k(1), "s@e.com");
+        var flujo = admin(servicio, "Steve");
+        flujo.onLogin(new LoginPassword(k(9), Optional.empty()));
+        flujo.onLogin(new LoginPassword(k(1), Optional.empty()));
+        assertThat(flujo.onEnrollConfirm(new dev.sam.common.proto.account.TotpConfirm("abc")).kick()).as("segundo fallo").isEmpty();
+        var tercero = flujo.onEnrollConfirm(new dev.sam.common.proto.account.TotpConfirm("abc"));
+        assertThat(tercero.kick()).contains(LoginFlow.KICK_TOO_MANY);
+    }
+
+    @Test
+    void unJugadorNormalOUnAdminConDosFANoSeEnrolan() {
+        var servicio = conBoveda();
+        servicio.register("Alex", k(2), "a@e.com");
+        var normal = admin(servicio, "Alex");
+        var respuesta = normal.onLogin(new LoginPassword(k(2), Optional.empty()));
+        assertThat(respuesta.done()).isTrue();
+        assertThat(respuesta.enroll()).isEmpty();
+        conDosFA(servicio);
+        assertThat(admin(servicio, "Steve").onLogin(new LoginPassword(k(1), Optional.empty()))).isEqualTo(necesitaCodigo());
+        fueraDeEstado(() -> admin(servicio, "Alex").onEnrollConfirm(new dev.sam.common.proto.account.TotpConfirm("123456")));
+    }
+
+    @Test
+    void sinBovedaElAdminEntraIgualSinEnrolarse() {
+        cuentas.register("Steve", k(1), "s@e.com");
+        var flujo = admin(cuentas, "Steve");
+        var respuesta = flujo.onLogin(new LoginPassword(k(1), Optional.empty()));
+        assertThat(respuesta.done()).isTrue();
+        assertThat(respuesta.enroll()).isEmpty();
+    }
+
+    @Test
+    void conGoogleTambienSeEnrola() {
+        var servicio = conBoveda();
+        servicio.register("Steve", k(1), "s@e.com");
+        servicio.linkGoogle("steve", "sub-steve");
+        var flujo = admin(servicio, "Steve");
+        var respuesta = flujo.onGoogle(Optional.of("sub-steve"));
+        assertThat(respuesta.result().orElseThrow().status()).isEqualTo(Status.NEED_ENROLL);
+        assertThat(respuesta.enroll()).isPresent();
     }
 
     // ===== Entrar con Google (REQUERIMIENTOS 5.5) =====

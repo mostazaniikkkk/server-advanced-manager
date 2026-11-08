@@ -90,6 +90,12 @@ public final class SamAuth {
     private volatile Setup setup;
     /** Los nicks que completaron el 2FA en su sesión actual (RF-ADM-04, nodos {@code verified} de RF-PERM-06). */
     private final Set<String> verified = ConcurrentHashMap.newKeySet();
+    /** Quién es admin (RF-ADM-03a); lo define SamServer con los permisos. Sin definir, nadie. */
+    private volatile java.util.function.BiPredicate<MinecraftServer, com.mojang.authlib.GameProfile> admins = (s, p) -> false;
+
+    public void admins(java.util.function.BiPredicate<MinecraftServer, com.mojang.authlib.GameProfile> check) {
+        admins = check;
+    }
 
     public SamAuth(Logger log) {
         this.log = log;
@@ -109,6 +115,14 @@ public final class SamAuth {
             (payload, context) -> receive(context.networkHandler(), context.server(), payload, LoginTotp.MAX_BYTES, LoginTotp::read,
                 LoginFlow::onTotp));
         PayloadTypeRegistry.configurationS2C().register(OAUTH_URL, SamPayload.codec(OAUTH_URL, MAX_SERVER_MESSAGE));
+        // Enrolamiento obligatorio de admins en el login (RF-ADM-03a): los mismos mensajes que en el juego
+        PayloadTypeRegistry.configurationS2C().register(SamAccount.TOTP_ENROLL, SamPayload.codec(SamAccount.TOTP_ENROLL, MAX_SERVER_MESSAGE));
+        PayloadTypeRegistry.configurationC2S().register(SamAccount.TOTP_CONFIRM,
+            SamPayload.codec(SamAccount.TOTP_CONFIRM, dev.sam.common.proto.account.TotpConfirm.MAX_BYTES));
+        ServerConfigurationNetworking.registerGlobalReceiver(SamAccount.TOTP_CONFIRM,
+            (payload, context) -> receive(context.networkHandler(), context.server(), payload,
+                dev.sam.common.proto.account.TotpConfirm.MAX_BYTES, dev.sam.common.proto.account.TotpConfirm::read,
+                LoginFlow::onEnrollConfirm));
 
         ServerConfigurationConnectionEvents.CONFIGURE.register(this::configure);
         // sam auth reset <nick> (RF-AUTH-07, RF-ADM-07): solo la consola real; nadie más lo ve
@@ -221,7 +235,8 @@ public final class SamAuth {
                 return;
             }
             var throttle = ready.throttle();
-            var flow = new LoginFlow(nick, ready.serverId(), serverName(server), ready.policy(), ready.accounts(), MAX_ATTEMPTS, throttle, ip);
+            var admin = admins.test(server, handler.getOwner());
+            var flow = new LoginFlow(nick, ready.serverId(), serverName(server), ready.policy(), ready.accounts(), MAX_ATTEMPTS, throttle, ip, n -> admin);
             flows.put(handler, flow);
             var hello = flow.hello();
             sender.accept(ServerConfigurationNetworking.createS2CPacket(new SamPayload(HELLO, encode(hello::write))));
@@ -342,6 +357,13 @@ public final class SamAuth {
         if (flows.get(handler) != flow) {
             return;
         }
+        // RF-ADM-03a: el QR y los códigos van antes del NEED_ENROLL
+        reply.enroll().ifPresent(enrollment -> {
+            dev.sam.server.SamAudit.event("admin.enrolamiento", nick, pendingIps.getOrDefault(handler, ""),
+                "admin sin 2FA: debe activarlo para entrar");
+            ServerConfigurationNetworking.send(handler, new SamPayload(SamAccount.TOTP_ENROLL,
+                encode(new dev.sam.common.proto.account.TotpEnroll(enrollment.uri(), enrollment.backupCodes())::write)));
+        });
         reply.result().ifPresent(result -> ServerConfigurationNetworking.send(handler,
             new SamPayload(AUTH_RESULT, encode(result::write))));
         // H-09: cada intento fallido queda en la auditoría, con la IP y el motivo

@@ -120,6 +120,7 @@ public final class SamServer implements DedicatedServerModInitializer {
         permissions = Optional.of(dev.sam.server.perms.SamPermissions.install(LOGGER,
             FabricLoader.getInstance().getConfigDir().resolve("sam/permissions.json"), config, AUTH::verified));
         permissions.ifPresent(p -> SamAuditCommands.install(p::sensitiveAllowed));
+        permissions.ifPresent(p -> AUTH.admins(p::isAdmin));
         net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.DISCONNECT.register((handler, s) ->
             AUTH.forget(handler.getPlayer().getGameProfile().getName()));
         // RF-ADM-03/04 (H-01, H-02): un OP sin 2FA entra como jugador normal y se le dice cómo activar sus permisos

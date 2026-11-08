@@ -65,6 +65,22 @@ public final class SamClientAuth {
         PayloadTypeRegistry.configurationC2S().register(OAUTH_CODE, SamPayload.codec(OAUTH_CODE, OAuthCode.MAX_BYTES));
         PayloadTypeRegistry.configurationC2S().register(LOGIN_TOTP, SamPayload.codec(LOGIN_TOTP, LoginTotp.MAX_BYTES));
         PayloadTypeRegistry.configurationS2C().register(OAUTH_URL, SamPayload.codec(OAUTH_URL, MAX_SERVER_MESSAGE));
+        // RF-ADM-03a: un admin sin 2FA lo activa en el login (los mismos mensajes que en "Opciones de cuenta")
+        var enroll = dev.sam.client.account.SamClientAccount.TOTP_ENROLL;
+        var confirm = dev.sam.client.account.SamClientAccount.TOTP_CONFIRM;
+        PayloadTypeRegistry.configurationS2C().register(enroll, SamPayload.codec(enroll, MAX_SERVER_MESSAGE));
+        PayloadTypeRegistry.configurationC2S().register(confirm,
+            SamPayload.codec(confirm, dev.sam.common.proto.account.TotpConfirm.MAX_BYTES));
+        ClientConfigurationNetworking.registerGlobalReceiver(enroll, (payload, context) -> {
+            var data = decode(payload, dev.sam.common.proto.account.TotpEnroll::read, context.responseSender());
+            if (data != null) {
+                context.client().execute(() -> {
+                    if (context.client().screen instanceof AuthScreen screen) {
+                        screen.onEnroll(data);
+                    }
+                });
+            }
+        });
         ClientConfigurationNetworking.registerGlobalReceiver(OAUTH_URL, (payload, context) -> {
             var url = decode(payload, OAuthUrl::read, context.responseSender());
             if (url != null) {
@@ -97,6 +113,8 @@ public final class SamClientAuth {
                 context.client().execute(() -> {
                     if (context.client().screen instanceof AuthScreen screen) {
                         screen.onResult(result);
+                    } else if (context.client().screen instanceof dev.sam.client.account.TotpEnrollScreen enrolling) {
+                        enrolling.onLoginResult(result);
                     }
                 });
             }

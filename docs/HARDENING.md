@@ -34,7 +34,7 @@ Las brechas marcadas **[operador]** tocan el equipo o el servidor del operador. 
 | Id | P | Brecha |
 |---|---|---|
 | H-01 | ✅ | **Cerrada 2026-11-08** (mixin sobre `getProfilePermissions`, RF-ADM-04): el nivel de OP solo vale con el 2FA completado en la sesión; si no, nivel 0. Verificado en un clon: un OP sin 2FA no puede usar `/gamemode`, uno con 2FA sí
-| H-02 | P1 (parcial) | **Los admins no están obligados a activar 2FA** (`requireTotp`/`mustEnroll` fijos en `false`, RF-ADM-03) | **Avance 2026-11-08**: un OP sin 2FA entra como jugador normal, queda en la auditoría y se le dice cómo activarlo. Falta el enrolamiento obligatorio en la AuthScreen (`NEED_ENROLL`)
+| H-02 | ✅ | **Cerrada 2026-11-08** (RF-ADM-03a): un admin (ops ≥ `SAM_ADMIN_OP_LEVEL` o `sam.admin`) sin TOTP recibe `NEED_ENROLL` y la pantalla "Activar 2FA" en el login; el primer código válido lo activa y entra con la sesión verificada. Verificado en un clon (enrolamiento, login verificado y `/gamemode`)
 | H-03 | ✅ | **Cerrada 2026-11-08** (`LoginThrottle`, RF-AUTH-06a): bloqueo exponencial por (cuenta, IP) que sobrevive a la reconexión, global de cuenta más suave, logins pendientes por IP y globales, cola de Argon2 de 64 (`SAM-K005`). Verificado en un clon: la segunda conexión se rechaza antes de Argon2. Pendiente: los fallos de contraseña en "Opciones de cuenta" (en juego) todavía usan su propio contador
 | H-04 | P2 | Sin caducidad de sesión ni reautenticación para comandos sensibles (`SAM_POLICY_*_SESSION_TTL`) |
 | H-05 | P2 | `/sam scripts reload` y similares solo piden OP 4, no el criterio de comando sensible (consola o admin verificado) |

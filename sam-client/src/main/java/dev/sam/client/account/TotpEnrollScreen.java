@@ -19,7 +19,33 @@ import net.minecraft.network.chat.Component;
  * códigos de respaldo (solo se muestran aquí) y el primer código, que lo activa. El secreto solo vive en
  * esta pantalla: no se guarda en el cliente.
  */
-final class TotpEnrollScreen extends Screen implements dev.sam.client.ProtectedScreen {
+public final class TotpEnrollScreen extends Screen implements dev.sam.client.ProtectedScreen {
+
+    /** Dónde vive la pantalla: en "Opciones de cuenta" (en el juego) o en el login de un admin (RF-ADM-03a). */
+    public interface Host {
+        /** Manda el primer código de la app. */
+        void send(String code);
+
+        /** "Cancelar" (o "Salir" en el login). */
+        void cancel();
+
+        /** El 2FA quedó activo. */
+        void enabled();
+
+        /** Cada tick (en el login, la pantalla atiende la conexión). */
+        default void tick() {
+        }
+
+        /** El texto del botón de salir. */
+        default String cancelLabel() {
+            return "Cancelar";
+        }
+
+        /** Un aviso inicial (el del admin obligado), o vacío. */
+        default String notice() {
+            return "";
+        }
+    }
 
     private static final int PANEL_WIDTH = 300;
     private static final int PANEL_HEIGHT = 210;
@@ -29,7 +55,7 @@ final class TotpEnrollScreen extends Screen implements dev.sam.client.ProtectedS
     private static final int YELLOW = 0xFFDD55;
     private static final int RED = 0xFF5555;
 
-    private final AccountScreen parent;
+    private final Host host;
     private final String secret;
     private final List<String> backupCodes;
     private final QrCode qr;
@@ -41,9 +67,36 @@ final class TotpEnrollScreen extends Screen implements dev.sam.client.ProtectedS
     private int left;
     private int panelTop;
 
+    /** En "Opciones de cuenta". */
     TotpEnrollScreen(AccountScreen parent, TotpEnroll enroll) {
-        super(Component.literal("Activar 2FA"));
+        this(new Host() {
+            @Override
+            public void send(String code) {
+                SamClientAccount.send(SamClientAccount.TOTP_CONFIRM, new TotpConfirm(code)::write);
+            }
+
+            @Override
+            public void cancel() {
+                net.minecraft.client.Minecraft.getInstance().setScreen(parent);
+            }
+
+            @Override
+            public void enabled() {
+                parent.onTotpEnabled();
+                net.minecraft.client.Minecraft.getInstance().setScreen(parent);
+            }
+        }, enroll);
         this.parent = parent;
+    }
+
+    private AccountScreen parent;
+
+    public TotpEnrollScreen(Host host, TotpEnroll enroll) {
+        super(Component.literal("Activar 2FA"));
+        this.host = host;
+        if (!host.notice().isEmpty()) {
+            status = host.notice();
+        }
         this.secret = DevTotp.secretOf(enroll.uri());
         this.backupCodes = enroll.backupCodes();
         this.qr = QrCode.encodeText(enroll.uri(), QrCode.Ecc.LOW);
@@ -63,7 +116,7 @@ final class TotpEnrollScreen extends Screen implements dev.sam.client.ProtectedS
         addRenderableWidget(code);
         confirm = addRenderableWidget(Button.builder(Component.literal("Activar"), b -> confirm())
             .bounds(left + 106, y, 88, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("Cancelar"), b -> onClose())
+        addRenderableWidget(Button.builder(Component.literal(host.cancelLabel()), b -> onClose())
             .bounds(left + 198, y, 90, 20).build());
         setInitialFocus(code);
         refresh();
@@ -75,6 +128,7 @@ final class TotpEnrollScreen extends Screen implements dev.sam.client.ProtectedS
     public void tick() {
         super.tick();
         ticks++;
+        host.tick();
         devConfirm();
     }
 
@@ -89,29 +143,46 @@ final class TotpEnrollScreen extends Screen implements dev.sam.client.ProtectedS
         status = "Comprobando el código…";
         statusColor = YELLOW;
         refresh();
-        SamClientAccount.send(SamClientAccount.TOTP_CONFIRM, new TotpConfirm(code.getValue())::write);
+        host.send(code.getValue());
         code.setValue("");
     }
 
     void onResult(AccountResult result) {
+        result(result.status() == AccountResult.Status.OK, result.detail());
+    }
+
+    /** La respuesta en el login (RF-ADM-03a): OK es que ya entra al mundo. */
+    public void onLoginResult(dev.sam.common.proto.auth.AuthResult result) {
+        result(result.status() == dev.sam.common.proto.auth.AuthResult.Status.OK, result.detail());
+    }
+
+    private void result(boolean ok, java.util.Optional<String> detail) {
         busy = false;
-        if (result.status() == AccountResult.Status.OK) {
-            parent.onTotpEnabled();
-            minecraft.setScreen(parent);
+        if (ok) {
+            status = "¡2FA activado! Entrando…";
+            statusColor = 0x55FF55;
+            host.enabled();
             return;
         }
-        status = result.detail().orElse("No se pudo activar") + ". Prueba con el código siguiente.";
+        status = detail.orElse("No se pudo activar") + ". Prueba con el código siguiente.";
         statusColor = RED;
         refresh();
     }
 
     void onInfo(AccountInfo info) {
-        parent.onInfo(info);
+        if (parent != null) {
+            parent.onInfo(info);
+        }
     }
 
     @Override
     public void onClose() {
-        minecraft.setScreen(parent);
+        host.cancel();
+    }
+
+    @Override
+    public boolean shouldCloseOnEsc() {
+        return true;
     }
 
     @Override
@@ -123,7 +194,7 @@ final class TotpEnrollScreen extends Screen implements dev.sam.client.ProtectedS
     private void devConfirm() {
         var file = System.getProperty("sam.dev.totpFile");
         if (!net.fabricmc.loader.api.FabricLoader.getInstance().isDevelopmentEnvironment() || file == null || busy
-                || !"totp".equals(System.getProperty("sam.dev.account"))) {
+                || !"totp".equals(System.getProperty("sam.dev.account")) && parent != null) {
             return;
         }
         // Primero la captura (ya dibujada), después el código

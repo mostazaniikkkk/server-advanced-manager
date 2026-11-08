@@ -132,6 +132,18 @@ public final class AccountService {
         if (!verified(nick, k)) {
             return new TotpBegin(accountFailed(WRONG_PASSWORD), Optional.empty());
         }
+        return begin(nick, issuer);
+    }
+
+    /**
+     * RF-ADM-03a: el enrolamiento obligatorio de un admin en el login, que ya probó quién es. Vacío si el 2FA no
+     * está disponible en el servidor o la cuenta ya lo tiene.
+     */
+    public Optional<Enrollment> enrollAtLogin(String nick, String issuer) {
+        return vault.isEmpty() ? Optional.empty() : begin(nick, issuer).enrollment();
+    }
+
+    private TotpBegin begin(String nick, String issuer) {
         synchronized (this) {
             var account = accounts.get(Nick.normalize(nick));
             if (account.totp().isPresent()) {
