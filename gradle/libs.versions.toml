@@ -8,7 +8,7 @@ loom = "1.19.3"
 netty = "4.1.97.Final"
 # netty-codec-http va embebido en sam-server: la última 4.1.x con los arreglos de seguridad (H-18). Solo usa clases del
 # núcleo 4.1.97 de Minecraft (auditado: lo único nuevo es ZstdDecoder en HttpContentDecompressor, que SAM no usa)
-nettyHttp = "4.1.140.Final"
+nettyHttp = "4.2.20.Final"
 junit = "5.11.3"
 assertj = "3.26.3"
 jqwik = "1.9.1"
