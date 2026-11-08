@@ -743,7 +743,7 @@ En el servidor, `messages` agrega `sam.send(jugador, canal, datos)` (devuelve `f
 | `checkbox` | `id`, `text`, `checked` |
 | `image` | `path` (PNG del script), `w`, `h` |
 
-`id` `[a-z0-9_]{1,32}`, único en la pantalla. Eventos para `sam.screen.on`: `{type = "click", id}`, `{type = "change", id, value}` (texto o booleano) y `{type = "close"}`. Toda pantalla de script lleva abajo la marca **"Interfaz del servidor"**, que el script no puede quitar ni tapar (RS-LUA-09), y su título no puede ser el de una pantalla de SAM. Solo se abre en el mundo, sin pantalla o sobre otra pantalla de script; nunca sobre una pantalla de SAM ni de vanilla (devuelve `false`).
+`id` `[a-z0-9_]{1,32}`, único en la pantalla. Volver a llamar `sam.screen.open` con la pantalla del mismo script abierta la redibuja: la anterior **no** recibe `close`. Eventos para `sam.screen.on`: `{type = "click", id}`, `{type = "change", id, value}` (texto o booleano) y `{type = "close"}`. Toda pantalla de script lleva abajo la marca **"Interfaz del servidor"**, que el script no puede quitar ni tapar (RS-LUA-09), y su título no puede ser el de una pantalla de SAM. Solo se abre en el mundo, sin pantalla o sobre otra pantalla de script; nunca sobre una pantalla de SAM ni de vanilla (devuelve `false`).
 
 **Pantallas protegidas (RS-LUA-07/08).** Mientras hay una pantalla de SAM abierta (inicio de sesión, consentimiento de scripts, cuenta, 2FA), los scripts del cliente no reciben nada: ni ticks, ni teclas, ni mensajes, ni eventos de pantalla, y el HUD no se dibuja. Los mensajes que llegan en ese tiempo esperan (hasta 64) y se entregan al cerrarla.
 

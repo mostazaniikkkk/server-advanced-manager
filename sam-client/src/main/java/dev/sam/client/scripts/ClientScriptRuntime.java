@@ -300,6 +300,10 @@ final class ClientScriptRuntime implements ScriptHost.ClientBridge {
         // Se abre en el próximo paso: no se cambia de pantalla mientras corre Lua
         minecraft.tell(() -> {
             if (running && (minecraft.screen == null || minecraft.screen instanceof ScriptScreen)) {
+                // Volver a abrirla con otros datos (redibujar) no es cerrarla: no recibe close
+                if (minecraft.screen instanceof ScriptScreen own && own.script().equals(script)) {
+                    own.coveredByChild();
+                }
                 minecraft.setScreen(new ScriptScreen(this, script, spec));
             }
         });
