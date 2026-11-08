@@ -63,7 +63,7 @@ Las brechas marcadas **[operador]** tocan el equipo o el servidor del operador. 
 
 | Id | P | Brecha |
 |---|---|---|
-| H-16 | ✅ | **Cerrada 2026-11-08** (RF-CFG-11): `backup.ps1` arma el respaldo en una carpeta temporal solo del dueño y lo cifra con `sam-signer backup-seal` (AES-256-GCM por bloques, `SAM_BACKUP_KEY`), con `.sha256` al lado; `restore.ps1` verifica, descifra y extrae en una carpeta nueva. Restauración probada en un clon (archivos idénticos; con otra clave no abre). Pendiente del operador: definir `SAM_BACKUP_KEY` y decidir qué hacer con los 2 zips viejos en claro
+| H-16 | ✅ | **Cerrada 2026-11-08** (RF-CFG-11): `backup.ps1` arma el respaldo en una carpeta temporal solo del dueño y lo cifra con `sam-signer backup-seal` (AES-256-GCM por bloques, `SAM_BACKUP_KEY`), con `.sha256` al lado; `restore.ps1` verifica, descifra y extrae en una carpeta nueva. Restauración probada en un clon (archivos idénticos; con otra clave no abre). Los 2 zips viejos en claro se cifraron (verificados) y se borraron; el operador define `SAM_BACKUP_KEY` en su entorno
 | H-17 | P2 [operador] | El respaldo vive en el mismo disco que el servidor; no hay copia fuera del equipo |
 
 ### Desarrollo seguro y cadena de suministro (A.8.8, A.8.25-8.29, A.8.32 / CC7.1, CC8.1)
@@ -80,7 +80,7 @@ Las brechas marcadas **[operador]** tocan el equipo o el servidor del operador. 
 
 | Id | P | Brecha |
 |---|---|---|
-| H-23 | P1 [operador] | El archivo de la passphrase de identidad e `identity.p12` son legibles por cualquier usuario del equipo (ACL heredada) |
+| H-23 | ✅ [operador] | **Cerrada 2026-11-08** con la decisión del operador: la passphrase y `identity.p12` de QA Server SAM quedaron solo para su usuario (`icacls`, sin herencia). Los archivos nuevos ya nacen así (H-12)
 | H-24 | P2 [operador] | RCON está activo, con la contraseña en claro en `server.properties`. Hoy escucha solo en 127.0.0.1 |
 | H-25 | P2 [operador] | Con WebSocket detrás de Cloudflare, `SAM_TCP_ENABLED=true` deja una entrada directa que se salta el CDN |
 | H-26 | P3 [operador] | QA y producción son el mismo servidor y el mismo directorio |
