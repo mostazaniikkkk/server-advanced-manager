@@ -180,7 +180,7 @@ public final class SamAccount {
                 }
                 var result = ready.accounts().linkGoogle(nick, sub.get());
                 if (result.status() == AccountResult.Status.OK) {
-                    log.info("[auditoría] {} vinculó Google", nick);
+                    dev.sam.server.SamAudit.event("cuenta.google", nick, "", "vinculó Google");
                 }
                 send(player, RESULT, result::write);
                 sendInfo(player, ready);
@@ -209,7 +209,7 @@ public final class SamAccount {
                 }
                 var nick = nick(player);
                 if (result.status() == AccountResult.Status.OK) {
-                    log.info("[auditoría] {} {}", nick, audit);
+                    dev.sam.server.SamAudit.event("cuenta.cambio", nick, "", audit);
                 }
                 if (countFailure(player, result)) {
                     return;
@@ -232,7 +232,7 @@ public final class SamAccount {
         }
         var wrong = result.detail().filter(d -> d.equals(AccountService.WRONG_PASSWORD) || d.equals(AccountService.WRONG_CODE));
         if (wrong.isPresent() && failures.merge(player.getUUID(), 1, Integer::sum) >= SamAuth.MAX_ATTEMPTS) {
-            log.info("[auditoría] {} expulsado: {}", nick(player), LoginFlow.KICK_TOO_MANY);
+            dev.sam.server.SamAudit.event("cuenta.expulsado", nick(player), "", LoginFlow.KICK_TOO_MANY);
             player.connection.disconnect(Component.literal(LoginFlow.KICK_TOO_MANY));
             return true;
         }
@@ -251,7 +251,7 @@ public final class SamAccount {
         try {
             return SamReader.decode(Unpooled.wrappedBuffer(payload.data()), max, reader);
         } catch (ProtocolException e) {
-            log.warn("[auditoría] Error de protocolo de {}: {} ({})", nick(player), e.code(), e.getMessage());
+            dev.sam.server.SamAudit.event("protocolo.error", nick(player), "", e.code() + " (" + e.getMessage() + ")");
             player.connection.disconnect(Component.literal("Error de protocolo. [" + e.code() + "]"));
             return null;
         }

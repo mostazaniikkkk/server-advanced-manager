@@ -1,7 +1,5 @@
 package dev.sam.server.mixin;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -31,8 +29,6 @@ import net.minecraft.server.network.ServerConfigurationPacketListenerImpl;
 public abstract class ServerConfigurationPacketListenerMixin extends ServerCommonPacketListenerImpl {
 
     @Unique
-    private static final Logger SAM_LOG = LoggerFactory.getLogger("SAM");
-    @Unique
     private static final int MAX_WAIT_TICKS = 100;
 
     @Shadow
@@ -54,7 +50,7 @@ public abstract class ServerConfigurationPacketListenerMixin extends ServerCommo
             return;
         }
         if (sam$replaceDeadline < 0) {
-            SAM_LOG.info("[auditoría] {} se autenticó desde otra conexión: reemplaza a la sesión anterior", gameProfile.getName());
+            dev.sam.server.SamAudit.event("sesion.reemplazo", gameProfile.getName(), "", "se autenticó desde otra conexión: reemplaza a la sesión anterior");
             players.disconnectAllPlayersWithProfile(gameProfile);
             sam$replaceDeadline = server.getTickCount() + MAX_WAIT_TICKS;
         }

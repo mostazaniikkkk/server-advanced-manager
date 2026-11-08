@@ -120,7 +120,7 @@ final class MediaRelay {
         try {
             action.run();
         } catch (ProtocolException e) {
-            log.warn("[auditoría] Error de protocolo de {} en imágenes: {} ({})", player.getGameProfile().getName(), e.code(), e.getMessage());
+            dev.sam.server.SamAudit.event("protocolo.error", player.getGameProfile().getName(), "", "imágenes: " + e.code() + " (" + e.getMessage() + ")");
             uploads.remove(player.getUUID());
             player.connection.disconnect(Component.literal("Error de protocolo. [" + e.code() + "]"));
         }

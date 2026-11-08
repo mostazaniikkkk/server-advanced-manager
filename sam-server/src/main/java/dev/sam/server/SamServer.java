@@ -94,6 +94,8 @@ public final class SamServer implements DedicatedServerModInitializer {
             .map(mod -> mod.getMetadata().getVersion().getFriendlyString())
             .orElse("?");
         LOGGER.info("SAM Server {} cargado. Núcleo: {}", version, coreSmokeCheck());
+        // RF-AUTH-08: la auditoría encadenada, antes que cualquier evento
+        SamAudit.install(LOGGER, FabricLoader.getInstance().getConfigDir().resolve("sam/audit.jsonl"));
         AUTH.install();
         ACCOUNT.install();
         TransportConfig transport;
@@ -117,13 +119,14 @@ public final class SamServer implements DedicatedServerModInitializer {
         // Permisos nativos (RF-PERM): proveedor de fabric-permissions-api y /sam perms
         permissions = Optional.of(dev.sam.server.perms.SamPermissions.install(LOGGER,
             FabricLoader.getInstance().getConfigDir().resolve("sam/permissions.json"), config, AUTH::verified));
+        permissions.ifPresent(p -> SamAuditCommands.install(p::sensitiveAllowed));
         net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.DISCONNECT.register((handler, s) ->
             AUTH.forget(handler.getPlayer().getGameProfile().getName()));
         // RF-ADM-03/04 (H-01, H-02): un OP sin 2FA entra como jugador normal y se le dice cómo activar sus permisos
         net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.JOIN.register((handler, sender, s) -> {
             var profile = handler.getPlayer().getGameProfile();
             if (s.getPlayerList().isOp(profile) && !AUTH.verified(profile.getName())) {
-                LOGGER.info("[auditoría] {} es OP pero entró sin 2FA: juega sin permisos de OP", profile.getName());
+                SamAudit.event("admin.sin2fa", profile.getName(), "", "es OP pero entró sin 2FA: juega sin permisos de OP");
                 handler.getPlayer().sendSystemMessage(net.minecraft.network.chat.Component.literal(
                     "Eres admin, pero tus permisos de OP solo se activan con el 2FA. Actívalo en el inventario, botón "
                     + "\"Opciones de cuenta\", y vuelve a entrar.").withStyle(net.minecraft.ChatFormatting.GOLD));
@@ -171,7 +174,7 @@ public final class SamServer implements DedicatedServerModInitializer {
         if (outcome instanceof Ready ready) {
             var identity = ready.identity();
             // Hasta que exista la auditoría encadenada, los eventos de la entrada van al log
-            var realIp = transport.realIp(message -> LOGGER.warn("[auditoría] {}", message));
+            var realIp = transport.realIp(message -> SamAudit.event("ingreso.ip", "red", "", message));
             var loginOpen = startAuth(identity.serverId(), config);
             scripts.ifPresent(s -> s.identity(identity.privateKey()));
             ingress = new Ingress(transport.policy(), new SamRoutes(identity, transport.webSocketPath(), realIp, loginOpen),

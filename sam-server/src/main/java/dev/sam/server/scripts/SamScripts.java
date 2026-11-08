@@ -237,7 +237,7 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
             }
             host.deliver(message.script(), Optional.of(player(sender)), message.channel(), message.data());
         } catch (dev.sam.common.proto.ProtocolException e) {
-            log.warn("[auditoría] Error de protocolo de {}: {} ({})", nick, e.code(), e.getMessage());
+            dev.sam.server.SamAudit.event("protocolo.error", nick, "", e.code() + " (" + e.getMessage() + ")");
             sender.connection.disconnect(Component.literal("Error de protocolo. [" + e.code() + "]"));
         }
     }
@@ -388,7 +388,7 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
             source.sendFailure(Component.literal("No se pudo confirmar: " + e.getMessage()));
             return 0;
         }
-        log.warn("[auditoría] Clave de firma de scripts {} confirmada desde la consola", keyId);
+        dev.sam.server.SamAudit.event("scripts.clave", "consola", "", "clave de firma " + keyId + " confirmada");
         reload();
         installCommands(source.getServer());
         source.sendSuccess(() -> Component.literal("Clave " + keyId + " confirmada; scripts recargados."), true);

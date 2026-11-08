@@ -171,7 +171,7 @@ final class ClientScriptsDelivery {
             sender.accept(ServerConfigurationNetworking.createS2CPacket(new SamPayload(OFFER, encode(offer.offer()::write))));
             timer.schedule(() -> server.execute(() -> {
                 if (sessions.remove(handler, session)) {
-                    log.info("[auditoría] {} no respondió a la oferta de scripts en {} s", handler.getOwner().getName(), TIMEOUT_SECONDS);
+                    dev.sam.server.SamAudit.event("scripts.tiempo", handler.getOwner().getName(), "", "no respondió a la oferta de scripts en " + TIMEOUT_SECONDS + " s");
                     handler.disconnect(Component.literal(SamAuth.KICK_TIMEOUT));
                 }
             }), TIMEOUT_SECONDS, TimeUnit.SECONDS);
@@ -197,7 +197,7 @@ final class ClientScriptsDelivery {
             }
             step.apply(handler, session, SamReader.decode(Unpooled.wrappedBuffer(payload.data()), max, reader));
         } catch (ProtocolException e) {
-            log.warn("[auditoría] Error de protocolo de {}: {} ({})", handler.getOwner().getName(), e.code(), e.getMessage());
+            dev.sam.server.SamAudit.event("protocolo.error", handler.getOwner().getName(), "", e.code() + " (" + e.getMessage() + ")");
             sessions.remove(handler);
             handler.disconnect(Component.literal("Error de protocolo. [" + e.code() + "]"));
         }
@@ -208,11 +208,11 @@ final class ClientScriptsDelivery {
         var nick = handler.getOwner().getName();
         sessions.remove(handler);
         if (reply.kick().isPresent()) {
-            log.info("[auditoría] {} rechazó scripts requeridos (aceptó {}): expulsado", nick, consent.accepted());
+            dev.sam.server.SamAudit.event("scripts.rechazo", nick, "", "rechazó scripts requeridos (aceptó " + consent.accepted() + "): expulsado");
             handler.disconnect(Component.literal(reply.kick().get()));
             return;
         }
-        log.info("[auditoría] {} aceptó los scripts {}", nick, reply.accepted());
+        dev.sam.server.SamAudit.event("scripts.consentimiento", nick, "", "aceptó " + reply.accepted());
         accepted.put(nick, java.util.Set.copyOf(reply.accepted()));
         handler.completeTask(TASK);
     }

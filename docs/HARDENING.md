@@ -45,7 +45,7 @@ Las brechas marcadas **[operador]** tocan el equipo o el servidor del operador. 
 
 | Id | P | Brecha |
 |---|---|---|
-| H-08 | P1 | **Auditoría sin integridad**: las líneas `[auditoría]` van al log común de Minecraft, sin cadena de hash ni `/sam audit verify` (RF-AUTH-08) |
+| H-08 | ✅ | **Cerrada 2026-11-08** (`AuditLog` + `SamAudit`, RF-AUTH-08a): `config/sam/audit.jsonl` encadenado por SHA-256 y solo del dueño, `/sam audit verify|last|export` como comandos sensibles, cabeza de la cadena en el log al arrancar. Verificado en un clon y con un verificador independiente en Python
 | H-09 | P1 (parcial) | La auditoría no registra cada intento fallido, la IP, el motivo, el valor anterior de un permiso ni los comandos sensibles de vanilla | **Avance 2026-11-08**: cada intento fallido y cada login completo se registran con la IP y el motivo
 | H-10 | ✅ | **Cerrada 2026-11-08** (van a `config/sam/secretos-sugeridos.txt`, solo del dueño). Antes: **secretos en el log**: los valores sugeridos de `SAM_IDENTITY_PASSPHRASE` y `SAM_DATA_KEY` se escriben en `latest.log` y en sus archivos rotados |
 | H-11 | P2 | `SAM_AUDIT_IP_RETENTION` está documentada pero no se usa: no hay retención |

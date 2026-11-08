@@ -184,7 +184,7 @@ public final class SamPermissions {
         if (expiry.removed().isEmpty()) {
             return;
         }
-        expiry.removed().forEach(what -> log.info("[auditoría] permisos: venció {}", what));
+        expiry.removed().forEach(what -> dev.sam.server.SamAudit.event("permisos.vencio", "SAM", "", String.valueOf(what)));
         apply(expiry.set());
     }
 
@@ -312,7 +312,7 @@ public final class SamPermissions {
             source.sendFailure(Component.literal("No se cambió: " + e.getMessage()));
             return 0;
         }
-        log.info("[auditoría] permisos: {} {}", source.getTextName(), description);
+        dev.sam.server.SamAudit.event("permisos.cambio", source.getTextName(), "", description);
         source.sendSuccess(() -> Component.literal("Listo: " + description), false);
         return 1;
     }
@@ -321,7 +321,7 @@ public final class SamPermissions {
         try {
             var set = PermissionSet.parse(Files.readString(file));
             active = Optional.of(set);
-            log.info("[auditoría] permisos: {} recargó {}", source.getTextName(), file);
+            dev.sam.server.SamAudit.event("permisos.recarga", source.getTextName(), "", String.valueOf(file));
             source.sendSuccess(() -> Component.literal("Permisos recargados: " + set.groups().size() + " grupos, " + set.users().size()
                 + " jugadores."), false);
             return 1;

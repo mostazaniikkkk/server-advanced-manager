@@ -158,7 +158,7 @@ public final class SamAuth {
             return 0;
         }
         forget(nick);
-        log.info("[auditoría] La consola reinició la cuenta de {} (se borró: contraseña, correo, 2FA y Google)", nick);
+        dev.sam.server.SamAudit.event("cuenta.reset", "consola", "", nick + ": se borró contraseña, correo, 2FA y Google");
         var online = source.getServer().getPlayerList().getPlayerByName(nick);
         if (online != null) {
             online.connection.disconnect(Component.literal("Tu cuenta se reinició. Vuelve a entrar para crearla de nuevo."));
@@ -209,14 +209,14 @@ public final class SamAuth {
             var ip = clientIp(handler);
             // Antes de cualquier Argon2: logins pendientes (RF-AUTH-06b) y bloqueo vigente (RF-AUTH-06a)
             if (!ready.throttle().enter(ip)) {
-                log.info("[auditoría] {} rechazado desde {}: demasiados logins pendientes", nick, ip);
+                dev.sam.server.SamAudit.event("login.ocupado", nick, ip, "demasiados logins pendientes");
                 handler.disconnect(Component.literal(KICK_BUSY));
                 return;
             }
             pendingIps.put(handler, ip);
             var locked = ready.throttle().lockedUntil(nick, ip);
             if (locked.isPresent()) {
-                log.info("[auditoría] {} rechazado desde {}: bloqueado hasta {}", nick, ip, locked.get());
+                dev.sam.server.SamAudit.event("login.bloqueado", nick, ip, "bloqueado hasta " + locked.get());
                 handler.disconnect(Component.literal(LoginFlow.lockedKick(ready.throttle().remaining(locked.get()))));
                 return;
             }
@@ -227,7 +227,7 @@ public final class SamAuth {
             sender.accept(ServerConfigurationNetworking.createS2CPacket(new SamPayload(HELLO, encode(hello::write))));
             timer.schedule(() -> server.execute(() -> {
                 if (flows.get(handler) == flow && !flow.done() && !extended.contains(handler)) {
-                    log.info("[auditoría] {} no completó el login en {} s", nick, TIMEOUT_SECONDS);
+                    dev.sam.server.SamAudit.event("login.tiempo", nick, pendingIps.getOrDefault(handler, ""), "no completó el login en " + TIMEOUT_SECONDS + " s");
                     handler.disconnect(Component.literal(KICK_TIMEOUT));
                 }
             }), TIMEOUT_SECONDS, TimeUnit.SECONDS);
@@ -271,7 +271,7 @@ public final class SamAuth {
                 server.execute(() -> apply(handler, nick, flow, reply));
             });
         } catch (java.util.concurrent.RejectedExecutionException e) {
-            log.warn("[auditoría] {} rechazado: la cola de Argon2 está llena", nick);
+            dev.sam.server.SamAudit.event("login.ocupado", nick, pendingIps.getOrDefault(handler, ""), "la cola de Argon2 está llena");
             flows.remove(handler);
             handler.disconnect(Component.literal(KICK_BUSY));
         }
@@ -298,7 +298,7 @@ public final class SamAuth {
             if (extended.add(handler)) {
                 timer.schedule(() -> server.execute(() -> {
                     if (flows.get(handler) == flow && !flow.done()) {
-                        log.info("[auditoría] {} no completó el login con Google en {} s", nick, OAUTH_TIMEOUT_SECONDS);
+                        dev.sam.server.SamAudit.event("login.tiempo", nick, pendingIps.getOrDefault(handler, ""), "no completó el login con Google en " + OAUTH_TIMEOUT_SECONDS + " s");
                         handler.disconnect(Component.literal(KICK_TIMEOUT));
                     }
                 }), OAUTH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
@@ -346,10 +346,10 @@ public final class SamAuth {
             new SamPayload(AUTH_RESULT, encode(result::write))));
         // H-09: cada intento fallido queda en la auditoría, con la IP y el motivo
         reply.result().filter(result -> result.status() == AuthResult.Status.FAILED).ifPresent(result ->
-            log.info("[auditoría] intento fallido de {} desde {}: {}", nick, pendingIps.getOrDefault(handler, "?"),
+            dev.sam.server.SamAudit.event("login.fallido", nick, pendingIps.getOrDefault(handler, ""),
                 result.detail().orElse("sin detalle")));
         if (reply.kick().isPresent()) {
-            log.info("[auditoría] {} expulsado: {}", nick, reply.kick().get());
+            dev.sam.server.SamAudit.event("login.expulsado", nick, pendingIps.getOrDefault(handler, ""), reply.kick().get());
             flows.remove(handler);
             handler.disconnect(Component.literal(reply.kick().get()));
         } else if (reply.done()) {
@@ -358,8 +358,8 @@ public final class SamAuth {
             if (withTotp) {
                 verified.add(nick.toLowerCase(java.util.Locale.ROOT));
             }
-            log.info("[auditoría] {} completó el login de SAM desde {}{}", nick, pendingIps.getOrDefault(handler, "?"),
-                withTotp ? " (con 2FA: sesión verificada)" : "");
+            dev.sam.server.SamAudit.event("login.ok", nick, pendingIps.getOrDefault(handler, ""),
+                withTotp ? "con 2FA: sesión verificada" : "sin 2FA");
             flows.remove(handler);
             release(handler);
             handler.completeTask(TASK);
@@ -383,7 +383,7 @@ public final class SamAuth {
     }
 
     private void protocolError(ServerConfigurationPacketListenerImpl handler, String nick, ProtocolException e) {
-        log.warn("[auditoría] Error de protocolo de {}: {} ({})", nick, e.code(), e.getMessage());
+        dev.sam.server.SamAudit.event("protocolo.error", nick, pendingIps.getOrDefault(handler, ""), e.code() + " (" + e.getMessage() + ")");
         flows.remove(handler);
         handler.disconnect(Component.literal("Error de protocolo. [" + e.code() + "]"));
     }
