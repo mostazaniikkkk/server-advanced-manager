@@ -34,8 +34,12 @@ class LoginFlowTest {
 
     private final AccountService cuentas = new AccountService(List.of(), new Argon2Params(8, 1, 1), new SecureRandom(), c -> { });
 
+    /** Un tope alto: estos tests prueban el tope por conexión, no el bloqueo (que va aparte). */
+    private static final LoginThrottle SIN_BLOQUEO = new LoginThrottle(
+        new LoginThrottle.Limits(1000, java.time.Duration.ofMinutes(15), 1000, 1000), java.time.InstantSource.system());
+
     private LoginFlow flujo(String nick) {
-        return new LoginFlow(nick, ID, "Mi Servidor", POLITICA, cuentas, 3);
+        return new LoginFlow(nick, ID, "Mi Servidor", POLITICA, cuentas, 3, SIN_BLOQUEO, "9.9.9.9");
     }
 
     private static LoginFlow.Reply nada() {
@@ -96,7 +100,7 @@ class LoginFlowTest {
     void conDosFALaContrasenaPideElCodigoComoSegundoPaso() {
         var servicio = conBoveda();
         var secreto = conDosFA(servicio);
-        var flujo = new LoginFlow("STEVE", ID, "S", POLITICA, servicio, 3);
+        var flujo = new LoginFlow("STEVE", ID, "S", POLITICA, servicio, 3, SIN_BLOQUEO, "9.9.9.9");
         flujo.hello();
         flujo.onHelloAck(ACK);
         assertThat(flujo.onLogin(new LoginPassword(k(1), Optional.empty()))).isEqualTo(necesitaCodigo());
@@ -118,7 +122,7 @@ class LoginFlowTest {
     void conDosFAGoogleTambienPideElCodigo() {
         var servicio = conBoveda();
         var secreto = conDosFA(servicio);
-        var flujo = new LoginFlow("Steve", ID, "S", POLITICA, servicio, 3);
+        var flujo = new LoginFlow("Steve", ID, "S", POLITICA, servicio, 3, SIN_BLOQUEO, "9.9.9.9");
         flujo.hello();
         flujo.onHelloAck(ACK);
         fueraDeEstado(() -> flujo.onTotp(new LoginTotp("123456")));
@@ -130,7 +134,7 @@ class LoginFlowTest {
     void losCodigosMalosCuentanParaElTopeDeIntentos() {
         var servicio = conBoveda();
         conDosFA(servicio);
-        var flujo = new LoginFlow("Steve", ID, "S", POLITICA, servicio, 3);
+        var flujo = new LoginFlow("Steve", ID, "S", POLITICA, servicio, 3, SIN_BLOQUEO, "9.9.9.9");
         flujo.hello();
         flujo.onHelloAck(ACK);
         flujo.onLogin(new LoginPassword(k(9), Optional.empty()));
@@ -138,6 +142,55 @@ class LoginFlowTest {
         assertThat(flujo.onTotp(new LoginTotp("abc")).kick()).as("segundo fallo").isEmpty();
         var tercero = flujo.onTotp(new LoginTotp("abc"));
         assertThat(tercero.kick()).contains(LoginFlow.KICK_TOO_MANY);
+    }
+
+    // ===== Bloqueo entre conexiones (RF-AUTH-06a, H-03) =====
+
+    private static final java.time.Instant T0 = java.time.Instant.parse("2026-11-08T12:00:00Z");
+
+    private LoginFlow conectar(String nick, LoginThrottle throttle, String ip) {
+        var flujo = new LoginFlow(nick, ID, "S", POLITICA, cuentas, 10, throttle, ip);
+        flujo.hello();
+        flujo.onHelloAck(ACK);
+        return flujo;
+    }
+
+    @Test
+    void reconectarNoReiniciaLosIntentosYElBloqueoDiceCuantoFalta() {
+        cuentas.register("Steve", k(1), "s@e.com");
+        var throttle = new LoginThrottle(new LoginThrottle.Limits(3, java.time.Duration.ofMinutes(15), 5, 5), () -> T0);
+        var primera = conectar("Steve", throttle, "1.1.1.1");
+        assertThat(primera.onLogin(new LoginPassword(k(9), Optional.empty())).kick()).isEmpty();
+        assertThat(primera.onLogin(new LoginPassword(k(9), Optional.empty())).kick()).isEmpty();
+        var segunda = conectar("Steve", throttle, "1.1.1.1");
+        var tercero = segunda.onLogin(new LoginPassword(k(9), Optional.empty()));
+        assertThat(tercero.result()).hasValueSatisfying(r -> assertThat(r.status()).isEqualTo(Status.FAILED));
+        assertThat(tercero.kick()).contains("Demasiados intentos fallidos. Reintenta en 15 min. [SAM-K004]");
+        assertThat(segunda.done()).isFalse();
+        assertThat(throttle.lockedUntil("steve", "1.1.1.1")).isPresent();
+        assertThat(throttle.lockedUntil("steve", "2.2.2.2")).isEmpty();
+    }
+
+    @Test
+    void unLoginCorrectoLimpiaLosIntentos() {
+        cuentas.register("Steve", k(1), "s@e.com");
+        var throttle = new LoginThrottle(new LoginThrottle.Limits(3, java.time.Duration.ofMinutes(15), 5, 5), () -> T0);
+        var primera = conectar("Steve", throttle, "1.1.1.1");
+        primera.onLogin(new LoginPassword(k(9), Optional.empty()));
+        primera.onLogin(new LoginPassword(k(9), Optional.empty()));
+        assertThat(conectar("Steve", throttle, "1.1.1.1").onLogin(new LoginPassword(k(1), Optional.empty())).done()).isTrue();
+        var tercera = conectar("Steve", throttle, "1.1.1.1");
+        assertThat(tercera.onLogin(new LoginPassword(k(9), Optional.empty())).kick()).isEmpty();
+        assertThat(tercera.onLogin(new LoginPassword(k(9), Optional.empty())).kick()).isEmpty();
+    }
+
+    @Test
+    void elMensajeDeBloqueoRedondeaLosMinutosHaciaArriba() {
+        assertThat(LoginFlow.lockedKick(java.time.Duration.ofSeconds(61))).isEqualTo("Demasiados intentos fallidos. Reintenta en 2 min. [SAM-K004]");
+        assertThat(LoginFlow.lockedKick(java.time.Duration.ofSeconds(60))).contains("en 1 min.");
+        assertThat(LoginFlow.lockedKick(java.time.Duration.ofSeconds(1))).contains("en 1 min.");
+        assertThat(LoginFlow.lockedKick(java.time.Duration.ZERO)).contains("en 1 min.");
+        assertThat(LoginFlow.lockedKick(java.time.Duration.ofHours(24))).contains("en 1440 min.");
     }
 
     // ===== Entrar con Google (REQUERIMIENTOS 5.5) =====

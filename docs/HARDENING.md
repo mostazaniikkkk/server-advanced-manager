@@ -35,7 +35,7 @@ Las brechas marcadas **[operador]** tocan el equipo o el servidor del operador. 
 |---|---|---|
 | H-01 | P1 | **Un OP conserva todo el poder de vanilla sin 2FA** (`/op`, `/ban`, `/gamemode`...). RF-ADM-04 y RS-ADM-01 están escritos pero no implementados |
 | H-02 | P1 | **Los admins no están obligados a activar 2FA** (`requireTotp`/`mustEnroll` fijos en `false`, RF-ADM-03) |
-| H-03 | P1 | **Sin bloqueo real de fuerza bruta**: solo 5 intentos por conexión, y reconectar reinicia el contador. Falta el bloqueo por cuenta y por IP con espera creciente (RF-AUTH-06). La cola de Argon2 no tiene tope (DoS) |
+| H-03 | ✅ | **Cerrada 2026-11-08** (`LoginThrottle`, RF-AUTH-06a): bloqueo exponencial por (cuenta, IP) que sobrevive a la reconexión, global de cuenta más suave, logins pendientes por IP y globales, cola de Argon2 de 64 (`SAM-K005`). Verificado en un clon: la segunda conexión se rechaza antes de Argon2. Pendiente: los fallos de contraseña en "Opciones de cuenta" (en juego) todavía usan su propio contador
 | H-04 | P2 | Sin caducidad de sesión ni reautenticación para comandos sensibles (`SAM_POLICY_*_SESSION_TTL`) |
 | H-05 | P2 | `/sam scripts reload` y similares solo piden OP 4, no el criterio de comando sensible (consola o admin verificado) |
 | H-06 | P2 | Contraseña mínima de 6 caracteres y sin lista de contraseñas comunes (RN-45) |
@@ -46,7 +46,7 @@ Las brechas marcadas **[operador]** tocan el equipo o el servidor del operador. 
 | Id | P | Brecha |
 |---|---|---|
 | H-08 | P1 | **Auditoría sin integridad**: las líneas `[auditoría]` van al log común de Minecraft, sin cadena de hash ni `/sam audit verify` (RF-AUTH-08) |
-| H-09 | P1 | La auditoría no registra cada intento fallido, la IP, el motivo, el valor anterior de un permiso ni los comandos sensibles de vanilla |
+| H-09 | P1 (parcial) | La auditoría no registra cada intento fallido, la IP, el motivo, el valor anterior de un permiso ni los comandos sensibles de vanilla | **Avance 2026-11-08**: cada intento fallido y cada login completo se registran con la IP y el motivo
 | H-10 | ✅ | **Cerrada 2026-11-08** (van a `config/sam/secretos-sugeridos.txt`, solo del dueño). Antes: **secretos en el log**: los valores sugeridos de `SAM_IDENTITY_PASSPHRASE` y `SAM_DATA_KEY` se escriben en `latest.log` y en sus archivos rotados |
 | H-11 | P2 | `SAM_AUDIT_IP_RETENTION` está documentada pero no se usa: no hay retención |
 

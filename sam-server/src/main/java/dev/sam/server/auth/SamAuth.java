@@ -69,16 +69,23 @@ public final class SamAuth {
     public static final String KICK_NO_SAM = "Este servidor requiere SAM Client para entrar. [SAM-K001]";
     public static final String KICK_TIMEOUT = "Tiempo de espera agotado. [SAM-K003]";
     public static final String KICK_UNAVAILABLE = "Inicio de sesión no disponible. [SAM-K006]";
+    public static final String KICK_BUSY = "Servidor ocupado, reintenta en unos segundos. [SAM-K005]";
+    /** Logins esperando Argon2 (RF-AUTH-06b): con la cola llena, la conexión se rechaza con SAM-K005. */
+    private static final int HASH_QUEUE = 64;
 
     /** Lo que se necesita para atender logins; hasta tenerlo, el login queda cerrado. */
-    public record Setup(AccountService accounts, ServerId serverId, AuthPolicyView policy, Optional<GoogleSignIn> google) {
+    public record Setup(AccountService accounts, ServerId serverId, AuthPolicyView policy, Optional<GoogleSignIn> google,
+            dev.sam.common.auth.LoginThrottle throttle) {
     }
 
     private final Logger log;
     private final Map<ServerConfigurationPacketListenerImpl, LoginFlow> flows = new ConcurrentHashMap<>();
     /** Conexiones cuyo plazo se extendió por OAuth: el plazo normal ya no las expulsa. */
     private final Set<ServerConfigurationPacketListenerImpl> extended = ConcurrentHashMap.newKeySet();
-    private final ExecutorService hashing = Executors.newFixedThreadPool(2, daemon("SAM Argon2"));
+    private final ExecutorService hashing = new java.util.concurrent.ThreadPoolExecutor(2, 2, 0, TimeUnit.SECONDS,
+        new java.util.concurrent.ArrayBlockingQueue<>(HASH_QUEUE), daemon("SAM Argon2"));
+    /** La IP de cada login pendiente, para liberar su lugar al terminar (RF-AUTH-06a). */
+    private final Map<ServerConfigurationPacketListenerImpl, String> pendingIps = new ConcurrentHashMap<>();
     private final ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor(daemon("SAM auth timeout"));
     private volatile Setup setup;
     /** Los nicks que completaron el 2FA en su sesión actual (RF-ADM-04, nodos {@code verified} de RF-PERM-06). */
@@ -114,6 +121,7 @@ public final class SamAuth {
         ServerConfigurationConnectionEvents.DISCONNECT.register((handler, server) -> {
             flows.remove(handler);
             extended.remove(handler);
+            release(handler);
             var ready = setup;
             if (ready != null) {
                 ready.google().ifPresent(google -> google.forget(handler));
@@ -198,7 +206,22 @@ public final class SamAuth {
         @Override
         public void start(Consumer<Packet<?>> sender) {
             var nick = handler.getOwner().getName();
-            var flow = new LoginFlow(nick, ready.serverId(), serverName(server), ready.policy(), ready.accounts(), MAX_ATTEMPTS);
+            var ip = clientIp(handler);
+            // Antes de cualquier Argon2: logins pendientes (RF-AUTH-06b) y bloqueo vigente (RF-AUTH-06a)
+            if (!ready.throttle().enter(ip)) {
+                log.info("[auditoría] {} rechazado desde {}: demasiados logins pendientes", nick, ip);
+                handler.disconnect(Component.literal(KICK_BUSY));
+                return;
+            }
+            pendingIps.put(handler, ip);
+            var locked = ready.throttle().lockedUntil(nick, ip);
+            if (locked.isPresent()) {
+                log.info("[auditoría] {} rechazado desde {}: bloqueado hasta {}", nick, ip, locked.get());
+                handler.disconnect(Component.literal(LoginFlow.lockedKick(ready.throttle().remaining(locked.get()))));
+                return;
+            }
+            var throttle = ready.throttle();
+            var flow = new LoginFlow(nick, ready.serverId(), serverName(server), ready.policy(), ready.accounts(), MAX_ATTEMPTS, throttle, ip);
             flows.put(handler, flow);
             var hello = flow.hello();
             sender.accept(ServerConfigurationNetworking.createS2CPacket(new SamPayload(HELLO, encode(hello::write))));
@@ -231,21 +254,27 @@ public final class SamAuth {
             protocolError(handler, nick, e);
             return;
         }
-        // Argon2 fuera del hilo del servidor; la respuesta vuelve a él
-        hashing.execute(() -> {
-            LoginFlow.Reply reply;
-            try {
-                reply = step.apply(flow, message);
-            } catch (ProtocolException e) {
-                server.execute(() -> protocolError(handler, nick, e));
-                return;
-            } catch (RuntimeException e) {
-                log.error("Error en el login de {}", nick, e);
-                server.execute(() -> handler.disconnect(Component.literal(KICK_UNAVAILABLE)));
-                return;
-            }
-            server.execute(() -> apply(handler, nick, flow, reply));
-        });
+        // Argon2 fuera del hilo del servidor; la respuesta vuelve a él. Con la cola llena, SAM-K005
+        try {
+            hashing.execute(() -> {
+                LoginFlow.Reply reply;
+                try {
+                    reply = step.apply(flow, message);
+                } catch (ProtocolException e) {
+                    server.execute(() -> protocolError(handler, nick, e));
+                    return;
+                } catch (RuntimeException e) {
+                    log.error("Error en el login de {}", nick, e);
+                    server.execute(() -> handler.disconnect(Component.literal(KICK_UNAVAILABLE)));
+                    return;
+                }
+                server.execute(() -> apply(handler, nick, flow, reply));
+            });
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+            log.warn("[auditoría] {} rechazado: la cola de Argon2 está llena", nick);
+            flows.remove(handler);
+            handler.disconnect(Component.literal(KICK_BUSY));
+        }
     }
 
     /** "Entrar con Google" (PROTOCOLO.md 5.4): abre el flujo y manda la URL; el plazo pasa a 300 s. */
@@ -315,6 +344,10 @@ public final class SamAuth {
         }
         reply.result().ifPresent(result -> ServerConfigurationNetworking.send(handler,
             new SamPayload(AUTH_RESULT, encode(result::write))));
+        // H-09: cada intento fallido queda en la auditoría, con la IP y el motivo
+        reply.result().filter(result -> result.status() == AuthResult.Status.FAILED).ifPresent(result ->
+            log.info("[auditoría] intento fallido de {} desde {}: {}", nick, pendingIps.getOrDefault(handler, "?"),
+                result.detail().orElse("sin detalle")));
         if (reply.kick().isPresent()) {
             log.info("[auditoría] {} expulsado: {}", nick, reply.kick().get());
             flows.remove(handler);
@@ -325,10 +358,28 @@ public final class SamAuth {
             if (withTotp) {
                 verified.add(nick.toLowerCase(java.util.Locale.ROOT));
             }
-            log.info("[auditoría] {} completó el login de SAM{}", nick, withTotp ? " (con 2FA: sesión verificada)" : "");
+            log.info("[auditoría] {} completó el login de SAM desde {}{}", nick, pendingIps.getOrDefault(handler, "?"),
+                withTotp ? " (con 2FA: sesión verificada)" : "");
             flows.remove(handler);
+            release(handler);
             handler.completeTask(TASK);
         }
+    }
+
+    private void release(ServerConfigurationPacketListenerImpl handler) {
+        var ip = pendingIps.remove(handler);
+        var ready = setup;
+        if (ip != null && ready != null) {
+            ready.throttle().leave(ip);
+        }
+    }
+
+    /** La IP del cliente (la real si vino por un proxy de confianza, RS-WS-02), como texto. */
+    private static String clientIp(ServerConfigurationPacketListenerImpl handler) {
+        var connection = ((dev.sam.server.mixin.ServerCommonPacketListenerAccessor) handler).sam$connection();
+        var channel = ((dev.sam.server.mixin.ConnectionAccessor) connection).sam$channel();
+        return channel == null ? "desconocida"
+            : dev.sam.common.net.ip.ClientIp.of(channel).map(java.net.InetAddress::getHostAddress).orElse("desconocida");
     }
 
     private void protocolError(ServerConfigurationPacketListenerImpl handler, String nick, ProtocolException e) {

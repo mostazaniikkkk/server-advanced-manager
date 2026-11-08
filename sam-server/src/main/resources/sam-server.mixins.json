@@ -5,8 +5,10 @@
   "compatibilityLevel": "JAVA_21",
   "server": [
     "CommandSourceStackAccessor",
+    "ConnectionAccessor",
     "DedicatedServerConsoleMixin",
     "ServerChannelInitializerMixin",
+    "ServerCommonPacketListenerAccessor",
     "ServerConfigurationPacketListenerMixin",
     "ServerLoginPacketListenerMixin",
     "StatusResponseMixin"

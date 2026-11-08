@@ -202,7 +202,9 @@ public final class SamServer implements DedicatedServerModInitializer {
                         throw new UncheckedIOException("No se pudieron guardar las cuentas en " + file, e);
                     }
                 }, dataVault(config), java.time.Clock.systemUTC());
-            AUTH.activate(new SamAuth.Setup(accounts, serverId, policy, google));
+            var throttle = new dev.sam.common.auth.LoginThrottle(dev.sam.common.auth.LoginThrottle.Limits.fromConfig(config),
+                java.time.InstantSource.system());
+            AUTH.activate(new SamAuth.Setup(accounts, serverId, policy, google, throttle));
             ACCOUNT.activate(new SamAccount.Setup(accounts, google));
             LOGGER.info("Login de SAM abierto: contraseña{}; {} cuentas en {}",
                 google.map(g -> " y Google (client_id " + g.clientId() + ")").orElse(""), AccountsFile.load(file).size(), file);

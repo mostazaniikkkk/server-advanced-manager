@@ -29,6 +29,12 @@ public final class LoginFlow {
     public static final String KICK_INCOMPATIBLE = "Tu SAM Client es incompatible con este servidor. [SAM-K002]";
     public static final String KICK_TOO_MANY = "Demasiados intentos fallidos. [SAM-K004]";
 
+    /** El kick de un par o una cuenta bloqueados, con los minutos que faltan (redondeados hacia arriba, mínimo 1). */
+    public static String lockedKick(java.time.Duration remaining) {
+        var minutes = Math.max(1, (remaining.toSeconds() + 59) / 60);
+        return "Demasiados intentos fallidos. Reintenta en " + minutes + " min. [SAM-K004]";
+    }
+
     /**
      * Lo que hay que hacer tras un mensaje del cliente.
      *
@@ -47,11 +53,19 @@ public final class LoginFlow {
     private final AuthPolicyView policy;
     private final AccountService accounts;
     private final int maxAttempts;
+    private final LoginThrottle throttle;
+    private final String ip;
     private State state = State.NEW;
     private int failures;
 
+    /**
+     * @param throttle los intentos entre conexiones (RF-AUTH-06a): un fallo cuenta para el par (cuenta, IP)
+     * @param ip la IP del cliente (RS-WS-02), como texto
+     */
     public LoginFlow(String nick, ServerId serverId, String serverName, AuthPolicyView policy, AccountService accounts,
-            int maxAttempts) {
+            int maxAttempts, LoginThrottle throttle, String ip) {
+        this.throttle = throttle;
+        this.ip = ip;
         this.nick = nick;
         this.serverId = serverId;
         this.serverName = serverName;
@@ -141,10 +155,16 @@ public final class LoginFlow {
 
     private Reply done(AuthResult result) {
         state = State.DONE;
+        throttle.success(nick, ip);
         return new Reply(Optional.of(result), Optional.empty(), true);
     }
 
     private Reply failure(AuthResult result) {
+        var locked = throttle.failure(nick, ip);
+        if (locked.isPresent()) {
+            state = State.CLOSED;
+            return new Reply(Optional.of(result), Optional.of(lockedKick(throttle.remaining(locked.get()))), false);
+        }
         if (++failures >= maxAttempts) {
             state = State.CLOSED;
             return new Reply(Optional.of(result), Optional.of(KICK_TOO_MANY), false);
