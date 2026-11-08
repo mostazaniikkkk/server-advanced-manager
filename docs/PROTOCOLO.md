@@ -704,6 +704,7 @@ Lectura estricta como `signature.json`: como mucho 4 KiB, claves desconocidas, d
 | `players` | `sam.players()`: lista de `{name, uuid}` de los jugadores en línea |
 | `chat` | `sam.tell(nombre, texto)` y `sam.broadcast(texto)` (texto plano, ≤ 256 caracteres) |
 | `permissions` | `sam.has(jugador, nodo)` y `sam.meta(jugador, clave)`, solo lectura (`docs/PERMISOS.md`, sección 5); con esta capacidad, `sam.command` acepta `{node = "..."}`: si el nodo queda indefinido decide `permission`, que con `node` vale 2 por defecto |
+| `teleport` | `sam.position(jugador)` → `{x, y, z, yaw, pitch, dimension, health}` de un jugador en línea (o `nil`); `sam.teleport(jugador, {x, y, z, dimension[, yaw, pitch]})` lo lleva ahí (devuelve si se pudo: en línea y la dimensión existe). Coordenadas finitas, `x` y `z` dentro de ±30 000 000, `y` dentro de ±4096; `dimension` como `minecraft:the_nether`. Es una acción de juego que expone SAM (RF-LUA-03) |
 | `storage` | `sam.store.get(clave)`, `sam.store.set(clave, valor)` (`nil` borra; devuelve si la clave ya existía) y `sam.store.keys()` (lista ordenada): datos del script que sobreviven a reinicios y a `/reload` (RS-LUA-02b) |
 | `commands` | `sam.command(nombre, fn[, {permission = 0..4}])` registra `/nombre` (RF-LUA-03). Al ejecutarse: `fn(jugador, texto, args)` con el jugador como `{name, uuid}` (o `nil` si es la consola), el texto después del nombre y una lista con sus palabras. Si `fn` devuelve un valor, es la respuesta para quien lo ejecutó |
 

@@ -45,6 +45,9 @@ public final class ScriptHost {
     private static final java.util.regex.Pattern NODE = java.util.regex.Pattern.compile("[a-z0-9_-]+(\\.[a-z0-9_-]+)*");
     private static final int MAX_IMAGE = 512;
     private static final int MAX_TAB = 200;
+    private static final double MAX_XZ = 30_000_000;
+    private static final double MAX_Y = 4096;
+    private static final java.util.regex.Pattern DIMENSION = java.util.regex.Pattern.compile("[a-z0-9_.-]+:[a-z0-9_./-]+");
     private static final int MAX_KEYS = 8;
     private static final int MAX_MENU = 4;
     private static final int MAX_URL = 512;
@@ -117,6 +120,16 @@ public final class ScriptHost {
         /** Una meta de un jugador en línea (RF-PERM-07). */
         default Optional<String> meta(String player, String key) {
             return Optional.empty();
+        }
+
+        /** Dónde está un jugador en línea (capacidad {@code teleport}). */
+        default Optional<Position> position(String player) {
+            return Optional.empty();
+        }
+
+        /** Lleva a un jugador en línea a ese lugar. @return si se pudo (en línea y la dimensión existe) */
+        default boolean teleport(String player, Position to) {
+            return false;
         }
 
         /** Deja que {@code to} descargue una imagen que subió {@code from}. @return si {@code from} es el dueño */
@@ -205,6 +218,10 @@ public final class ScriptHost {
         default Optional<GameState> game() {
             return Optional.empty();
         }
+    }
+
+    /** Un lugar del mundo y, al leerlo de un jugador, su vida (para cancelar una espera si recibe daño). */
+    public record Position(double x, double y, double z, float yaw, float pitch, String dimension, double health) {
     }
 
     /** Un espacio de la barra rápida. */
@@ -594,6 +611,11 @@ public final class ScriptHost {
             functions.add(RegisteredFunction.of("meta", (s, player, key) ->
                 bridge.meta(string(player), string(key)).<LuaValue>map(LuaSandbox::lua).orElse(Constants.NIL)));
         }
+        if (!client && loaded.manifest.has("teleport")) {
+            functions.add(RegisteredFunction.of("position", (s, player) ->
+                bridge.position(string(player)).<LuaValue>map(ScriptHost::positionTable).orElse(Constants.NIL)));
+            functions.add(RegisteredFunction.of("teleport", (s, player, to) -> valueOf(bridge.teleport(string(player), position(to.checkTable())))));
+        }
         if (!client && loaded.manifest.has("commands")) {
             functions.add(RegisteredFunction.ofV("command", (s, args) -> command(loaded, args)));
         }
@@ -859,6 +881,36 @@ public final class ScriptHost {
                 return list;
             })});
         return table;
+    }
+
+    private static LuaTable positionTable(Position position) {
+        var table = new LuaTable();
+        table.rawset("x", valueOf(position.x()));
+        table.rawset("y", valueOf(position.y()));
+        table.rawset("z", valueOf(position.z()));
+        table.rawset("yaw", valueOf(position.yaw()));
+        table.rawset("pitch", valueOf(position.pitch()));
+        table.rawset("dimension", LuaSandbox.lua(position.dimension()));
+        table.rawset("health", valueOf(position.health()));
+        return table;
+    }
+
+    /** Un destino de {@code sam.teleport}: coordenadas finitas dentro del mundo y una dimensión con nombre válido. */
+    private static Position position(LuaTable to) throws LuaError {
+        var x = to.rawget("x").checkDouble();
+        var y = to.rawget("y").checkDouble();
+        var z = to.rawget("z").checkDouble();
+        if (!(Math.abs(x) <= MAX_XZ && Math.abs(z) <= MAX_XZ && Math.abs(y) <= MAX_Y)) {
+            throw new LuaError("x y z deben estar dentro del mundo (±" + (long) MAX_XZ + ", y ±" + (long) MAX_Y + ")");
+        }
+        var dimensionValue = to.rawget("dimension");
+        var dimension = dimensionValue.isNil() ? "nil" : string(dimensionValue);
+        if (!DIMENSION.matcher(dimension).matches()) {
+            throw new LuaError("dimensión inválida \"" + dimension + "\"");
+        }
+        var yaw = to.rawget("yaw").isNil() ? 0 : (float) to.rawget("yaw").checkDouble();
+        var pitch = to.rawget("pitch").isNil() ? 0 : (float) to.rawget("pitch").checkDouble();
+        return new Position(x, y, z, yaw, pitch, dimension, 0);
     }
 
     /** Una copia nueva de los datos de la partida para Lua (RS-LUA-02c). */

@@ -522,6 +522,31 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
         }
 
         @Override
+        public Optional<ScriptHost.Position> position(String player) {
+            var current = server;
+            var target = current == null ? null : current.getPlayerList().getPlayerByName(player);
+            if (target == null) {
+                return Optional.empty();
+            }
+            return Optional.of(new ScriptHost.Position(target.getX(), target.getY(), target.getZ(), target.getYRot(), target.getXRot(),
+                target.level().dimension().location().toString(), target.getHealth()));
+        }
+
+        @Override
+        public boolean teleport(String player, ScriptHost.Position to) {
+            var current = server;
+            var target = current == null ? null : current.getPlayerList().getPlayerByName(player);
+            var key = ResourceLocation.tryParse(to.dimension());
+            var level = current == null || key == null ? null
+                : current.getLevel(net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, key));
+            if (target == null || level == null) {
+                return false;
+            }
+            target.teleportTo(level, to.x(), to.y(), to.z(), to.yaw(), to.pitch());
+            return true;
+        }
+
+        @Override
         public boolean shareMedia(String id, String from, String to) {
             return media.share(id, from, to);
         }
