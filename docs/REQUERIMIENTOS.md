@@ -51,7 +51,7 @@ SAM es un mod nativo de **Fabric** que reemplaza a EssentialsX (plugin de Bukkit
 
 ## 4. Módulo Essentials (paridad con EssentialsX)
 
-Cada comando tiene un nodo de permiso `sam.command.<nombre>` y es configurable (se puede activar o desactivar y tiene cooldown y warmup).
+**Se implementa como plugins Lua** (datapacks firmados que entrega el servidor, uno por función), no como código nativo, salvo que el dueño del proyecto autorice lo nativo para una pieza (hasta ahora, solo los permisos, 4.1). Lo nativo se limita a las capacidades de la API Lua que esos plugins necesitan. Cada plugin documenta su diseño en `docs/plugins/`. Cada comando tiene un nodo de permiso `sam.command.<nombre>` y es configurable (se puede activar o desactivar y tiene cooldown y warmup).
 
 | ID | Grupo | Funcionalidades | Prioridad |
 |---|---|---|---|
