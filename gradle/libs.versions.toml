@@ -11,7 +11,7 @@ assertj = "3.26.3"
 jqwik = "1.9.1"
 # Sistema de archivos en memoria (POSIX y ACL) para probar permisos del .env sin depender del SO
 jimfs = "1.3.0"
-bouncycastle = "1.79"
+bouncycastle = "1.86"
 # Gson lo provee Minecraft en tiempo de ejecución; verificar la versión de 1.21.1 al montar Fabric
 gson = "2.10.1"
 # Gradle corre sobre JDK 25 (lo exige Loom 1.19): JaCoCo y PIT en versiones con soporte de Java 25
