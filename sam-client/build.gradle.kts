@@ -75,6 +75,7 @@ listOf("runClient", "runClient2").forEach { runTask -> tasks.named<JavaExec>(run
         "samDevKeepScreen" to "sam.dev.keepScreen",
         "samDevKeysScreen" to "sam.dev.keysScreen",
         "samDevMenu" to "sam.dev.menu",
+        "samDevMenuClick" to "sam.dev.menuClick",
         "samDevCloseScreenAfter" to "sam.dev.closeScreenAfter")
         .forEach { (property, key) -> (findProperty(property) as String?)?.let { systemProperty(key, it) } }
     (findProperty("samDevServer") as String?)?.let { args("--quickPlayMultiplayer", it) }

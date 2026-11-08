@@ -123,6 +123,7 @@ final class ClientScriptRuntime implements ScriptHost.ClientBridge {
         new LuaMessage("warm", "up", new byte[] {0}).write(new SamWriter(Unpooled.buffer()));
         ClientPlayNetworking.canSend(SamClientScripts.LUA_MSG);
         host.load(accepted.stream().map(r -> r.script()).toList());
+        reported.clear();
         saveKeyChoices();
         running = !accepted.isEmpty();
         devKeysScreen();
@@ -193,6 +194,25 @@ final class ClientScriptRuntime implements ScriptHost.ClientBridge {
         return Minecraft.getInstance().screen instanceof ProtectedScreen;
     }
 
+    /** Lo último que se registró de cada script: un error o una suspensión nunca pasan en silencio. */
+    private final java.util.Map<String, ScriptHost.Status> reported = new java.util.HashMap<>();
+
+    private void reportChanges() {
+        for (var status : host.status()) {
+            var before = reported.put(status.id(), status);
+            if (before == null || before.equals(status)) {
+                continue;
+            }
+            if (before.state() != status.state()) {
+                log.warn("Script {} del servidor: {} -> {}", status.id(), before.state(), status.state());
+            }
+            var errors = status.errors();
+            if (!errors.equals(before.errors()) && !errors.isEmpty()) {
+                log.warn("Script {}: {}", status.id(), errors.getLast());
+            }
+        }
+    }
+
     private void tick(Minecraft minecraft) {
         media.tick();
         if (!running || blocked()) {
@@ -203,6 +223,7 @@ final class ClientScriptRuntime implements ScriptHost.ClientBridge {
             deliver(message.script(), message.channel(), message.data());
         }
         host.tick();
+        reportChanges();
         // Teclas: solo en el mundo, sin pantalla abierta, al apretarlas (no mientras se mantienen)
         var window = minecraft.getWindow().getWindow();
         for (var entry : keys.entrySet()) {

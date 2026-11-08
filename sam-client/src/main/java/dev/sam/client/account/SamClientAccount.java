@@ -157,12 +157,37 @@ public final class SamClientAccount {
                 pause(500);
                 client.execute(() -> {
                     var items = Screens.getButtons(client.screen).stream().filter(MenuItemButton.class::isInstance).toList();
-                    if (!items.isEmpty()) {
-                        ((MenuItemButton) items.getLast()).onPress();
-                    }
+                    // La entrada con ese nombre, o la última (la de un plugin)
+                    items.stream().filter(b -> b.getMessage().getString().equalsIgnoreCase(name)).findFirst()
+                        .or(() -> items.stream().reduce((a, b) -> b)).ifPresent(b -> ((MenuItemButton) b).onPress());
                 });
                 pause(1500);
                 client.execute(() -> grab(client, name));
+                // -Dsam.dev.menuClick=texto: aprieta ese botón de la pantalla del script y vuelve a abrir la entrada
+                var click = System.getProperty("sam.dev.menuClick");
+                if (click != null) {
+                    client.execute(() -> Screens.getButtons(client.screen).stream()
+                        .filter(b -> b.getMessage().getString().equals(click)).filter(net.minecraft.client.gui.components.Button.class::isInstance).findFirst()
+                        .ifPresent(b -> ((net.minecraft.client.gui.components.Button) b).onPress()));
+                    pause(1500);
+                    client.execute(() -> grab(client, name + "-click"));
+                    pause(4500);
+                    client.execute(() -> client.setScreen(new InventoryScreen(client.player)));
+                    pause(1000);
+                    client.execute(() -> Screens.getButtons(client.screen).stream().filter(AccountButton.class::isInstance).findFirst()
+                        .ifPresent(button -> ((AccountButton) button).onPress()));
+                    pause(800);
+                    client.execute(() -> grab(client, name + "-2-menu"));
+                    pause(500);
+                    client.execute(() -> {
+                        var items = Screens.getButtons(client.screen).stream().filter(MenuItemButton.class::isInstance).toList();
+                        // La entrada con ese nombre, o la última (la de un plugin)
+                        items.stream().filter(b -> b.getMessage().getString().equalsIgnoreCase(name)).findFirst()
+                            .or(() -> items.stream().reduce((a, b) -> b)).ifPresent(b -> ((MenuItemButton) b).onPress());
+                    });
+                    pause(1500);
+                    client.execute(() -> grab(client, name + "-2"));
+                }
             }, "SAM dev menu");
             thread.setDaemon(true);
             thread.start();

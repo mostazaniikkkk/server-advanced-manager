@@ -47,6 +47,11 @@ public final class SamClientScripts {
 
     private static Logger log;
     private static ScriptCache cache;
+    /** RS-LUA-05: lo aceptado en cada servidor, para no volver a preguntar lo mismo. */
+    private static dev.sam.common.scripts.ScriptConsents consents;
+    /** El servidor y lo ofrecido en la conexión actual ({@code id -> id:sha256}). */
+    private static String offerPin;
+    private static java.util.Map<String, String> offered = java.util.Map.of();
     private static boolean enabled;
     private static ClientDelivery delivery;
     private static Connection connection;
@@ -60,6 +65,7 @@ public final class SamClientScripts {
     public static void install(Logger logger, Path cacheDir, Path settings) {
         log = logger;
         cache = new ScriptCache(cacheDir);
+        consents = new dev.sam.common.scripts.ScriptConsents(settings.resolveSibling("script-consents.properties"));
         enabled = enabled(settings);
         PayloadTypeRegistry.configurationS2C().register(OFFER, SamPayload.codec(OFFER, ScriptsOffer.MAX_BYTES));
         PayloadTypeRegistry.configurationS2C().register(CHUNK, SamPayload.codec(CHUNK, ScriptChunk.MAX_BYTES));
@@ -73,6 +79,9 @@ public final class SamClientScripts {
                 var pinned = SamClientNet.lastVerifiedKey()
                     .orElseThrow(() -> new ProtocolException(ProtocolException.OUT_OF_STATE, "oferta de scripts sin servidor verificado"));
                 accepted = List.of();
+                offerPin = pinned.pin().hex();
+                offered = offer.scripts().stream().collect(java.util.stream.Collectors.toMap(
+                    dev.sam.common.proto.scripts.ScriptRef::id, r -> dev.sam.common.scripts.ScriptConsents.entry(r.id(), r.sha256()), (a, b) -> a));
                 connection = ((ClientCommonPacketListenerAccessor) context.networkHandler()).sam$connection();
                 delivery = ClientDelivery.open(offer, pinned, cache);
                 log.info("Scripts del servidor: {} ofrecidos, {} en caché", offer.scripts().size(), delivery.ready().size());
@@ -132,7 +141,18 @@ public final class SamClientScripts {
             consent(sender, List.of());
             return;
         }
-        client.setScreen(new ScriptConsentScreen(done.ready(), done.failed(), sender, connection));
+        // Los mismos scripts que el jugador ya aceptó todos en este servidor: no se vuelve a preguntar
+        var ready = done.ready();
+        if (done.failed().isEmpty() && ready.size() == offered.size() && consents.covers(offerPin, entries(ready))) {
+            log.info("Scripts del servidor: consentimiento recordado, no se vuelve a preguntar");
+            consent(sender, ready);
+            return;
+        }
+        client.setScreen(new ScriptConsentScreen(ready, done.failed(), sender, connection));
+    }
+
+    private static List<String> entries(List<ClientDelivery.Ready> ready) {
+        return ready.stream().map(r -> offered.get(r.script().manifest().id())).toList();
     }
 
     /** La respuesta del jugador (la manda la pantalla de consentimiento). */
@@ -141,10 +161,24 @@ public final class SamClientScripts {
         var ids = chosen.stream().map(r -> r.script().manifest().id()).toList();
         log.info("Scripts del servidor aceptados: {}", ids);
         sender.sendPacket(new SamPayload(CONSENT, encode(new ScriptsConsent(ids)::write)));
+        // Se recuerda solo si aceptó todos; si rechazó alguno, la próxima vez se le pregunta
+        if (enabled && offerPin != null) {
+            try {
+                if (!chosen.isEmpty() && chosen.size() == offered.size() && !entries(chosen).contains(null)) {
+                    consents.remember(offerPin, entries(chosen));
+                } else {
+                    consents.forget(offerPin);
+                }
+            } catch (RuntimeException e) {
+                log.warn("No se pudo guardar el consentimiento de scripts: {}", e.getMessage());
+            }
+        }
     }
 
     private static void forget() {
         delivery = null;
+        offerPin = null;
+        offered = java.util.Map.of();
         connection = null;
         accepted = List.of();
     }

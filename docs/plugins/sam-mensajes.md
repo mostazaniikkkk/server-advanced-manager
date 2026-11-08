@@ -8,12 +8,14 @@ Plugin Lua oficial de SAM: un datapack firmado que entrega el servidor (como tod
 
 ## Para el jugador
 
-- **Abrirla**: en el inventario, el botón de **Opciones de cuenta** pasa a ser un menú desplegable con "Opciones de cuenta" y "Mensajes" (API de menús, abajo). También se abre con `/pm` sin argumentos.
-- **Conversaciones**: a la izquierda, la lista de conversaciones (la más reciente arriba, con un aviso de no leídos). A la derecha, la conversación elegida, el campo de texto y los botones:
+- **Abrirla**: en el inventario, el botón de **Opciones de cuenta** pasa a ser un menú desplegable con "Opciones de cuenta" y "Mensajes" (API de menús, abajo). También se abre con `/mensajes`, y `/mensajes <jugador>` abre directamente el chat con ese jugador.
+- **Con quién hablar**: a la izquierda, "Tus chats" (la más reciente arriba, con "(N nuevos)") y debajo "Conectados": los jugadores en línea sin chat todavía, para empezar con un clic. Abajo, "Nick del jugador:" y **Chatear** para escribirle a alguien que no está en la lista. La pantalla vacía dice qué hacer.
+- **La conversación**: a la derecha, "Chat con <jugador>", los mensajes, el campo de texto y los botones, siempre con texto (sin íconos sueltos):
   - **Enviar**;
-  - **📍 Posición**: agrega tus coordenadas y dimensión al mensaje;
-  - **📷 Captura**: toma lo que se ve en el juego, sin la interfaz;
-  - **🖼 Imagen**: elige una imagen de tu PC.
+  - **Incluir mi posición**: agrega tus coordenadas y dimensión al mensaje;
+  - **Captura**: toma lo que se ve en el juego, sin la interfaz;
+  - **Imagen PC**: elige una imagen de tu PC.
+  - En cada mensaje, **Link** abre su enlace y **Ver** muestra su imagen.
 - **Imágenes recibidas**: aparecen como "🖼 Imagen de Steve — ver". Solo se descargan y se muestran si haces clic.
 - **Links**: un texto que empieza con `http://` o `https://` se muestra como link. Al hacer clic, vanilla pregunta si quieres abrirlo.
 - **Comandos**: `/pm <jugador> <texto>` envía; `/r <texto>` responde al último que te escribió.

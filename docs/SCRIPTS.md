@@ -87,6 +87,8 @@ Un script con `"side": "client"` (o `"both"`) **no corre en el servidor**: se en
 | `kick` | cualquier script: se le expulsa. |
 | `allow` | lo que sea: entra sin esos scripts. |
 
+El cliente **recuerda** lo que el jugador aceptó en cada servidor (`config/sam-client/script-consents.properties`). Si al volver a entrar los scripts son exactamente los mismos y los había aceptado todos, entra sin ver la pantalla. Cualquier script nuevo o modificado (otro hash) vuelve a preguntar, y si el jugador rechazó alguno se le pregunta siempre.
+
 Un cliente de SAM sin soporte de scripts cuenta como si los rechazara todos. El jugador puede rechazarlos siempre con `enabled=false` en `config/sam-client/scripts.properties`.
 
 Topes por conexión: 128 scripts y 16 MiB en total (4 MiB por script). El cliente guarda cada script en `sam-client/script-cache/` por su hash y lo vuelve a verificar cada vez que lo usa: si cambias el script, se descarga de nuevo.
