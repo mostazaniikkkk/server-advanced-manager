@@ -37,7 +37,7 @@ jobs:
           output-file: sbom.cdx.json
           upload-artifact: false
       - name: Vulnerabilidades conocidas en las dependencias
-        uses: anchore/scan-action@v6
+        uses: anchore/scan-action@v7
         with:
           sbom: sbom.cdx.json
           fail-build: true
