@@ -24,11 +24,11 @@ jobs:
           distribution: temurin
           java-version: "25"
       - uses: gradle/actions/setup-gradle@v4
-      - uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/init@v4
         with:
           languages: java-kotlin
           build-mode: manual
           queries: security-extended
       - name: Compilar
         run: ./gradlew.bat assemble --console=plain
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@v4
