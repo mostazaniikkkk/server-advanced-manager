@@ -9,7 +9,7 @@ netty = "4.1.97.Final"
 # netty-codec-http va embebido en sam-server: la última 4.1.x con los arreglos de seguridad (H-18). Solo usa clases del
 # núcleo 4.1.97 de Minecraft (auditado: lo único nuevo es ZstdDecoder en HttpContentDecompressor, que SAM no usa)
 nettyHttp = "4.1.140.Final"
-junit = "5.11.3"
+junit = "6.1.3"
 assertj = "3.26.3"
 jqwik = "1.9.1"
 # Sistema de archivos en memoria (POSIX y ACL) para probar permisos del .env sin depender del SO
