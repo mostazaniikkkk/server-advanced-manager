@@ -71,6 +71,9 @@ public final class SamServer implements DedicatedServerModInitializer {
     /** Solo con la identidad cargada: anunciar SAM sin poder atender TLS dejaría al cliente sin entrar. */
     private static volatile Optional<StatusAdvert> statusAdvert = Optional.empty();
 
+    /** Los permisos nativos de SAM (RF-PERM). */
+    private static Optional<dev.sam.server.perms.SamPermissions> permissions = Optional.empty();
+
     /** Los scripts Lua, si están activos: firman su keylist con la identidad cuando se carga. */
     private static Optional<dev.sam.server.scripts.SamScripts> scripts = Optional.empty();
 
@@ -111,6 +114,11 @@ public final class SamServer implements DedicatedServerModInitializer {
             LOGGER.error("No se pudo leer server.properties: {}. Los scripts no guardan datos.", e.getMessage());
             scriptData = null;
         }
+        // Permisos nativos (RF-PERM): proveedor de fabric-permissions-api y /sam perms
+        permissions = Optional.of(dev.sam.server.perms.SamPermissions.install(LOGGER,
+            FabricLoader.getInstance().getConfigDir().resolve("sam/permissions.json"), config, AUTH::verified));
+        net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.DISCONNECT.register((handler, s) ->
+            AUTH.forget(handler.getPlayer().getGameProfile().getName()));
         scripts = dev.sam.server.scripts.SamScripts.install(LOGGER, FabricLoader.getInstance().getConfigDir().resolve("sam/keys"), config,
             Optional.ofNullable(scriptData));
         // Los límites aplican aunque el login de SAM quede cerrado: el vanilla también pasa por la compuerta

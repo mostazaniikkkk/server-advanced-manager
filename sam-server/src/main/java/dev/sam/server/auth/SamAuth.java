@@ -81,6 +81,8 @@ public final class SamAuth {
     private final ExecutorService hashing = Executors.newFixedThreadPool(2, daemon("SAM Argon2"));
     private final ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor(daemon("SAM auth timeout"));
     private volatile Setup setup;
+    /** Los nicks que completaron el 2FA en su sesión actual (RF-ADM-04, nodos {@code verified} de RF-PERM-06). */
+    private final Set<String> verified = ConcurrentHashMap.newKeySet();
 
     public SamAuth(Logger log) {
         this.log = log;
@@ -130,7 +132,19 @@ public final class SamAuth {
         this.setup = ready;
     }
 
+    /** Si ese jugador completó el 2FA al entrar en esta sesión. */
+    public boolean verified(String nick) {
+        return verified.contains(nick.toLowerCase(java.util.Locale.ROOT));
+    }
+
+    /** Al salir, la sesión verificada termina. */
+    public void forget(String nick) {
+        verified.remove(nick.toLowerCase(java.util.Locale.ROOT));
+    }
+
     private void configure(ServerConfigurationPacketListenerImpl handler, MinecraftServer server) {
+        // Una conexión nueva empieza sin verificar
+        forget(handler.getOwner().getName());
         var ready = setup;
         if (ready == null) {
             handler.disconnect(Component.literal(KICK_UNAVAILABLE));
@@ -279,7 +293,12 @@ public final class SamAuth {
             flows.remove(handler);
             handler.disconnect(Component.literal(reply.kick().get()));
         } else if (reply.done()) {
-            log.info("[auditoría] {} completó el login de SAM", nick);
+            // El flujo solo termina después del código si la cuenta tiene 2FA (5.0)
+            var withTotp = setup != null && setup.accounts().hasTotp(nick);
+            if (withTotp) {
+                verified.add(nick.toLowerCase(java.util.Locale.ROOT));
+            }
+            log.info("[auditoría] {} completó el login de SAM{}", nick, withTotp ? " (con 2FA: sesión verificada)" : "");
             flows.remove(handler);
             handler.completeTask(TASK);
         }

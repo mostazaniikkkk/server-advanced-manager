@@ -21,6 +21,10 @@ dependencies {
     mappings(loom.officialMojangMappings())
     modImplementation(libs.fabric.loader)
     modImplementation(libs.fabric.api)
+    // Permisos (RF-PERM-03): SAM es el proveedor de esta API; va dentro del jar
+    // Sin transitivas: trae módulos viejos de Fabric API que ya están (en su versión actual)
+    modImplementation(libs.fabric.permissions.api) { isTransitive = false }
+    include(libs.fabric.permissions.api) { isTransitive = false }
 
     // Embebidos (jar-in-jar): el operador instala un solo jar
     implementation(project(":sam-common"))

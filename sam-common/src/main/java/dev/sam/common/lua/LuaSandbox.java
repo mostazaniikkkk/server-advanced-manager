@@ -177,6 +177,10 @@ public final class LuaSandbox {
             } catch (LuaError e) {
                 // Cobalt ya convierte en LuaError las excepciones Java de la API y el desborde de pila
                 return new Outcome(Optional.empty(), Optional.of(e.getMessage()), exceeded);
+            } catch (LinkageError e) {
+                // Un error de SAM (por ejemplo, una librería compilada para otra versión de Minecraft) falla la
+                // llamada, no el servidor. Los demás Error (memoria, etc.) siguen su curso.
+                return Outcome.failed("error interno de SAM: " + e);
             } finally {
                 alarm.cancel(false);
             }

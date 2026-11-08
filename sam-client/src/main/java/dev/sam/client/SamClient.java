@@ -83,10 +83,13 @@ public final class SamClient implements ClientModInitializer {
         }
         net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
             LOGGER.info("[dev] En el mundo como {}; el juego se cierra en {} s", client.getUser().getName(), seconds);
-            // -Dsam.dev.command="hola mundo": ejecuta un comando al entrar (pruebas de los comandos de scripts)
+            // -Dsam.dev.command="hola mundo|otro": ejecuta comandos al entrar (pruebas de los comandos de scripts)
             var command = System.getProperty("sam.dev.command");
             if (command != null) {
-                client.execute(() -> handler.sendCommand(command));
+                // Varios comandos separados por "|", en orden
+                for (var each : command.split("\\|")) {
+                    client.execute(() -> handler.sendCommand(each.strip()));
+                }
             }
             var timer = new Thread(() -> {
                 try {

@@ -40,6 +40,9 @@ public final class ScriptHost {
     private static final int MAX_LOG = 512;
     static final int MAX_HUD = 64;
     static final int MAX_SENT = 32;
+    private static final int MAX_NODE = 128;
+    /** Un nodo de permiso sin comodín (docs/PERMISOS.md, sección 1). */
+    private static final java.util.regex.Pattern NODE = java.util.regex.Pattern.compile("[a-z0-9_-]+(\\.[a-z0-9_-]+)*");
     private static final int MAX_IMAGE = 512;
     private static final int MAX_TAB = 200;
     private static final int MAX_KEYS = 8;
@@ -98,6 +101,16 @@ public final class ScriptHost {
          */
         default boolean send(String script, String player, String channel, byte[] data) {
             return false;
+        }
+
+        /** Si un jugador en línea tiene un permiso (RF-PERM-07); lo indefinido es {@code false}. */
+        default boolean has(String player, String node) {
+            return false;
+        }
+
+        /** Una meta de un jugador en línea (RF-PERM-07). */
+        default Optional<String> meta(String player, String key) {
+            return Optional.empty();
         }
 
         /** Los datos guardados de ese script ({@code storage}); vacío si no hay dónde guardarlos. */
@@ -269,7 +282,12 @@ public final class ScriptHost {
     }
 
     /** Un comando registrado por un script ({@code sam.command}): su nombre, nivel de permiso y dueño. */
-    public record Command(String name, int permission, String script) {
+    public record Command(String name, int permission, String script, Optional<String> node) {
+
+        /** Un comando sin nodo: manda el nivel de OP. */
+        public Command(String name, int permission, String script) {
+            this(name, permission, script, Optional.empty());
+        }
     }
 
     private record CommandEntry(Command spec, Loaded owner, LuaFunction function) {
@@ -496,6 +514,11 @@ public final class ScriptHost {
                 return Constants.NIL;
             }));
         }
+        if (!client && loaded.manifest.has("permissions")) {
+            functions.add(RegisteredFunction.of("has", (s, player, node) -> valueOf(bridge.has(string(player), string(node)))));
+            functions.add(RegisteredFunction.of("meta", (s, player, key) ->
+                bridge.meta(string(player), string(key)).<LuaValue>map(LuaSandbox::lua).orElse(Constants.NIL)));
+        }
         if (!client && loaded.manifest.has("commands")) {
             functions.add(RegisteredFunction.ofV("command", (s, args) -> command(loaded, args)));
         }
@@ -566,9 +589,22 @@ public final class ScriptHost {
         var fn = args.arg(2).checkFunction();
         var options = args.arg(3);
         var permission = 0;
+        Optional<String> node = Optional.empty();
         if (!options.isNil()) {
             var level = options.checkTable().rawget("permission");
-            permission = level.isNil() ? 0 : level.checkInteger();
+            var required = options.checkTable().rawget("node");
+            // Con node, lo indefinido cae en este nivel: por defecto 2 (operadores), nunca "todos" sin pedirlo
+            permission = level.isNil() ? (required.isNil() ? 0 : 2) : level.checkInteger();
+            if (!required.isNil()) {
+                if (!loaded.manifest.has("permissions")) {
+                    throw new LuaError("node requiere la capacidad permissions");
+                }
+                var text = string(required);
+                if (text.length() > MAX_NODE || !NODE.matcher(text).matches()) {
+                    throw new LuaError("nodo inválido \"" + text + "\"");
+                }
+                node = Optional.of(text);
+            }
         }
         if (!COMMAND.matcher(name).matches()) {
             throw new LuaError("nombre de comando inválido \"" + name + "\": [a-z][a-z0-9_], hasta 32");
@@ -586,7 +622,7 @@ public final class ScriptHost {
         if (commands.values().stream().filter(e -> e.owner() == loaded).count() >= MAX_COMMANDS) {
             throw new LuaError("como mucho " + MAX_COMMANDS + " comandos por script");
         }
-        commands.put(name, new CommandEntry(new Command(name, permission, loaded.id()), loaded, fn));
+        commands.put(name, new CommandEntry(new Command(name, permission, loaded.id(), node), loaded, fn));
         return Constants.NONE;
     }
 

@@ -374,7 +374,8 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
 
     /** Solo desde la consola real del servidor: ni jugadores ni RCON (RS-SIG-03, RS-ADM-01). */
     private int trustConfirm(CommandSourceStack source, String keyId) {
-        if (!(((dev.sam.server.mixin.CommandSourceStackAccessor) source).sam$source() instanceof MinecraftServer)) {
+        // Solo la consola real: una función de datapack también corre con el servidor como origen (SamConsole)
+        if (!dev.sam.server.SamConsole.isConsole(source)) {
             source.sendFailure(Component.literal("Solo se puede confirmar una clave desde la consola del servidor."));
             return 0;
         }
@@ -420,7 +421,10 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
                 continue;
             }
             var level = command.permission();
-            dispatcher.register(Commands.literal(name).requires(source -> source.hasPermission(level))
+            var node = command.node();
+            // Con nodo, manda el sistema de permisos (SAM o LuckPerms); lo indefinido cae en el nivel de OP
+            dispatcher.register(Commands.literal(name).requires(source -> node.isPresent()
+                    ? me.lucko.fabric.api.permissions.v0.Permissions.check(source, node.get(), level) : source.hasPermission(level))
                 .executes(c -> runScriptCommand(name, c.getSource(), ""))
                 .then(Commands.argument("args", StringArgumentType.greedyString())
                     .executes(c -> runScriptCommand(name, c.getSource(), StringArgumentType.getString(c, "args")))));
@@ -496,6 +500,22 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
         @Override
         public void log(String script, String text) {
             log.info("[script {}] {}", script, text);
+        }
+
+        @Override
+        public boolean has(String player, String node) {
+            var current = server;
+            var target = current == null ? null : current.getPlayerList().getPlayerByName(player);
+            // Las variantes con Entity de fabric-permissions-api 0.3.x llaman a un método de 1.21.2+: se usa
+            // siempre la del origen de comandos del jugador
+            return target != null && me.lucko.fabric.api.permissions.v0.Permissions.check(target.createCommandSourceStack(), node, false);
+        }
+
+        @Override
+        public Optional<String> meta(String player, String key) {
+            var current = server;
+            var target = current == null ? null : current.getPlayerList().getPlayerByName(player);
+            return target == null ? Optional.empty() : me.lucko.fabric.api.permissions.v0.Options.get(target.createCommandSourceStack(), key);
         }
 
         @Override
