@@ -13,7 +13,7 @@ public record ScreenSpec(String title, int width, int height, List<Widget> widge
     }
 
     /** Un elemento de la pantalla. */
-    public sealed interface Widget permits Label, Button, TextField, Checkbox, Image {
+    public sealed interface Widget permits Label, Button, TextField, Checkbox, Image, Media {
     }
 
     public record Label(int x, int y, String text, int color) implements Widget {
@@ -39,6 +39,10 @@ public record ScreenSpec(String title, int width, int height, List<Widget> widge
         public byte[] png() {
             return png.clone();
         }
+    }
+
+    /** Una imagen subida por un jugador (capacidad {@code media}): se dibuja cuando se descargó. */
+    public record Media(String id, int x, int y, int w, int h) implements Widget {
     }
 
     /** Un evento de la pantalla para {@code sam.screen.on}: {@code click}, {@code change} o {@code close}. */

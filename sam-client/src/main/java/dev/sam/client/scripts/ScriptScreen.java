@@ -67,6 +67,9 @@ final class ScriptScreen extends Screen {
                 case ScreenSpec.Image i -> {
                     // Se dibuja en render
                 }
+                case ScreenSpec.Media m -> {
+                    // Se dibuja en render cuando se descargó
+                }
             }
         }
     }

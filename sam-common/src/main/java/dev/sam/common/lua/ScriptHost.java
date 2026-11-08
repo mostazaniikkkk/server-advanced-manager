@@ -48,6 +48,9 @@ public final class ScriptHost {
     private static final int MAX_KEYS = 8;
     private static final int MAX_MENU = 4;
     private static final int MAX_URL = 512;
+    private static final int MAX_MEDIA = 4;
+    private static final int MEDIA_SIDE = 128;
+    private static final java.util.regex.Pattern MEDIA_ID = java.util.regex.Pattern.compile("[0-9a-f]{32}");
     private static final int MAX_MENU_LABEL = 32;
     private static final int MAX_TITLE = 64;
     private static final int MAX_SHORT = 64;
@@ -116,6 +119,11 @@ public final class ScriptHost {
             return Optional.empty();
         }
 
+        /** Deja que {@code to} descargue una imagen que subió {@code from}. @return si {@code from} es el dueño */
+        default boolean shareMedia(String id, String from, String to) {
+            return false;
+        }
+
         /** Los datos guardados de ese script ({@code storage}); vacío si no hay dónde guardarlos. */
         default Optional<ScriptStore> store(String script) {
             return Optional.empty();
@@ -177,6 +185,19 @@ public final class ScriptHost {
 
         /** Pide confirmar y abrir un link (capacidad {@code links}); nunca lo abre sin confirmación. @return si se pidió */
         default boolean openUrl(String script, String url) {
+            return false;
+        }
+
+        /**
+         * Una captura del juego ({@code capture}) o un archivo elegido por el jugador ({@code pick}), que se sube
+         * al servidor; el resultado llega por {@link ScriptHost#mediaResult}. @return si se pudo empezar
+         */
+        default boolean requestMedia(String script, int request, String source) {
+            return false;
+        }
+
+        /** Descarga una imagen; el resultado llega por {@link ScriptHost#mediaResult}. @return si se pudo empezar */
+        default boolean fetchMedia(String script, int request, String id) {
             return false;
         }
 
@@ -283,6 +304,23 @@ public final class ScriptHost {
             .sorted(java.util.Comparator.comparingInt(MenuEntry::order).thenComparing(MenuEntry::label)).toList();
     }
 
+    /**
+     * El resultado de un pedido de {@code sam.media}: el id de la imagen, o el motivo si no se pudo.
+     *
+     * @return si el script esperaba ese pedido
+     */
+    public synchronized boolean mediaResult(String script, int request, Optional<String> id, Optional<String> error) {
+        var loaded = scripts.get(script);
+        var callback = loaded == null || loaded.state != State.RUNNING ? null : loaded.media.remove(request);
+        if (callback == null) {
+            return false;
+        }
+        LuaValue first = id.<LuaValue>map(LuaSandbox::lua).orElse(Constants.NIL);
+        LuaValue second = error.<LuaValue>map(LuaSandbox::lua).orElse(Constants.NIL);
+        run(loaded, () -> loaded.script.invoke(callback, first, second));
+        return true;
+    }
+
     /** El jugador eligió una entrada del menú. @return si el script la tenía */
     public synchronized boolean menuClicked(String script, String id) {
         var loaded = scripts.get(script);
@@ -344,6 +382,8 @@ public final class ScriptHost {
         final java.util.Set<String> keyIds = new java.util.HashSet<>();
         final Map<String, LuaFunction> keys = new java.util.HashMap<>();
         final Map<String, MenuItem> menu = new LinkedHashMap<>();
+        final Map<Integer, LuaFunction> media = new java.util.HashMap<>();
+        int nextMedia = 1;
         final Map<String, LuaFunction> receivers = new java.util.HashMap<>();
         int sent;
         int nextTask = 1;
@@ -595,6 +635,19 @@ public final class ScriptHost {
                 RegisteredFunction.ofV("add", (s, args) -> menuAdd(loaded, args)),
                 RegisteredFunction.of("remove", (s, id) -> valueOf(loaded.menu.remove(string(id)) != null))});
             sam.rawset("menu", menu);
+        }
+        if (loaded.manifest.has("media")) {
+            var media = new LuaTable();
+            if (client) {
+                RegisteredFunction.bind(media, new RegisteredFunction[] {
+                    RegisteredFunction.of("capture", (s, fn) -> mediaRequest(loaded, "capture", null, fn.checkFunction())),
+                    RegisteredFunction.of("pick", (s, fn) -> mediaRequest(loaded, "pick", null, fn.checkFunction())),
+                    RegisteredFunction.of("fetch", (s, id, fn) -> mediaRequest(loaded, "fetch", mediaId(id), fn.checkFunction()))});
+            } else {
+                RegisteredFunction.bind(media, new RegisteredFunction[] {
+                    RegisteredFunction.of("share", (s, id, from, to) -> valueOf(bridge.shareMedia(mediaId(id), string(from), string(to))))});
+            }
+            sam.rawset("media", media);
         }
         if (client && loaded.manifest.has("links")) {
             RegisteredFunction.bind(sam, new RegisteredFunction[] {
@@ -850,6 +903,27 @@ public final class ScriptHost {
         }
     }
 
+    /** Pide una imagen al juego; la respuesta llega por {@link #mediaResult}. */
+    private LuaValue mediaRequest(Loaded loaded, String kind, String id, LuaFunction callback) throws LuaError {
+        if (loaded.media.size() >= MAX_MEDIA) {
+            throw new LuaError("como mucho " + MAX_MEDIA + " imágenes en curso");
+        }
+        var request = loaded.nextMedia++;
+        var started = id == null ? ui.requestMedia(loaded.id(), request, kind) : ui.fetchMedia(loaded.id(), request, id);
+        if (started) {
+            loaded.media.put(request, callback);
+        }
+        return valueOf(started);
+    }
+
+    private static String mediaId(LuaValue value) throws LuaError {
+        var id = string(value);
+        if (!MEDIA_ID.matcher(id).matches()) {
+            throw new LuaError("id de imagen inválido \"" + id + "\"");
+        }
+        return id;
+    }
+
     /** Un link {@code http(s)} con host, de hasta 512 caracteres y sin espacios ni caracteres de control. */
     private static String link(String url) throws LuaError {
         try {
@@ -925,6 +999,9 @@ public final class ScriptHost {
         for (var i = 1; i <= list.length(); i++) {
             var w = list.rawget(i).checkTable();
             var type = string(w.rawget("type"));
+            if (type.equals("media") && !loaded.manifest.has("media")) {
+                throw new LuaError("widget de tipo desconocido \"media\"");
+            }
             var x = w.rawget("x").isNil() ? 0 : w.rawget("x").checkInteger();
             var y = w.rawget("y").isNil() ? 0 : w.rawget("y").checkInteger();
             if (x < 0 || x > width || y < 0 || y > height) {
@@ -953,6 +1030,8 @@ public final class ScriptHost {
                     yield new ScreenSpec.Image(path, png, x, y, imageSide(w.rawget("w"), info.width()),
                         imageSide(w.rawget("h"), info.height()));
                 }
+                case "media" -> new ScreenSpec.Media(mediaId(w.rawget("id")), x, y, imageSide(w.rawget("w"), MEDIA_SIDE),
+                    imageSide(w.rawget("h"), MEDIA_SIDE));
                 default -> throw new LuaError("widget de tipo desconocido \"" + type + "\"");
             });
         }
