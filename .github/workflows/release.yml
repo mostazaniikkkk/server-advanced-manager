@@ -1,0 +1,44 @@
+# H-21 (docs/HARDENING.md): al publicar una etiqueta vX.Y.Z se compila (jars reproducibles), se generan SHA256SUMS
+# y el SBOM, se firma la procedencia de cada jar (attestation SLSA de GitHub) y todo se adjunta al release.
+# Verificar un jar: gh attestation verify sam-server-X.Y.Z.jar --repo <dueño>/<repo>
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    # Windows: el mismo sistema que el desarrollo (la verificación de dependencias tiene los nativos de Windows)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build y pruebas
+        run: ./gradlew.bat build releaseChecksums --console=plain
+      - name: SBOM (CycloneDX)
+        uses: anchore/sbom-action@v0
+        with:
+          path: build/release
+          format: cyclonedx-json
+          output-file: build/release/sbom.cdx.json
+          upload-artifact: false
+      - name: Procedencia firmada de los jars
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: build/release/*.jar
+      - name: Publicar el release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: gh release create "${GITHUB_REF_NAME}" build/release/*.jar build/release/SHA256SUMS build/release/sbom.cdx.json --generate-notes --verify-tag

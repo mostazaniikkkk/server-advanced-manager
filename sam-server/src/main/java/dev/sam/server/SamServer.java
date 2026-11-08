@@ -250,15 +250,15 @@ public final class SamServer implements DedicatedServerModInitializer {
         }
     }
 
-    /**
-     * Cuentas y política de login (MVP: solo contraseña). Si las cuentas no se pueden leer, el login
-     * queda cerrado: arrancar sin ellas dejaría registrar de nuevo el nick de otro (RF-CFG-04).
-     */
     /** RF-ADM-04: si el jugador completó el 2FA en esta sesión (lo usa el mixin del nivel de OP). */
     public static boolean verified(String nick) {
         return AUTH.verified(nick);
     }
 
+    /**
+     * Cuentas y política de login (MVP: solo contraseña). Si las cuentas no se pueden leer, el login
+     * queda cerrado: arrancar sin ellas dejaría registrar de nuevo el nick de otro (RF-CFG-04).
+     */
     private static boolean startAuth(ServerId serverId, Map<String, String> config) {
         var file = FabricLoader.getInstance().getConfigDir().resolve("sam/accounts.json");
         try {

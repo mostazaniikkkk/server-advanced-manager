@@ -519,10 +519,6 @@ public final class AuthScreen extends Screen implements dev.sam.client.Protected
     // ===== Solo en el entorno de desarrollo de Loom (nunca en el jar publicado) =====
 
     /**
-     * {@code -Dsam.dev.password} rellena la pantalla y la envía (o solo la rellena con
-     * {@code sam.dev.fillOnly}); {@code sam.dev.confirm} y {@code sam.dev.email} cambian esos campos.
-     */
-    /**
      * {@code -Dsam.dev.totpFile=ruta}: en el segundo paso, calcula el código con el secreto guardado ahí por
      * el gancho de "Opciones de cuenta" y lo envía.
      */
@@ -537,6 +533,10 @@ public final class AuthScreen extends Screen implements dev.sam.client.Protected
         });
     }
 
+    /**
+     * {@code -Dsam.dev.password} rellena la pantalla y la envía (o solo la rellena con
+     * {@code sam.dev.fillOnly}); {@code sam.dev.confirm} y {@code sam.dev.email} cambian esos campos.
+     */
     private void devAutofill() {
         var devPassword = System.getProperty("sam.dev.password");
         if (!isDev() || devPassword == null || busy || totpStep) {
@@ -552,10 +552,6 @@ public final class AuthScreen extends Screen implements dev.sam.client.Protected
         }
     }
 
-    /**
-     * {@code -Dsam.dev.screenshot=nombre} guarda una captura de esta pantalla a los
-     * {@code sam.dev.screenshotDelay} ticks (30 por defecto) y cierra el juego.
-     */
     /** Lo mismo que hace la ConnectScreen con la conexión mientras está abierta. */
     void tickConnection() {
         if (connection.isConnected()) {
@@ -571,6 +567,10 @@ public final class AuthScreen extends Screen implements dev.sam.client.Protected
         return io.netty.buffer.ByteBufUtil.getBytes(buf);
     }
 
+    /**
+     * {@code -Dsam.dev.screenshot=nombre} guarda una captura de esta pantalla a los
+     * {@code sam.dev.screenshotDelay} ticks (30 por defecto) y cierra el juego.
+     */
     @Override
     public void tick() {
         super.tick();

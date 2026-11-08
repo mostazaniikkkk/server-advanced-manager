@@ -92,8 +92,9 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
     /**
      * Registra todo (una vez, al iniciar el mod, después del login), salvo que {@value #ENABLED} sea
      * {@code false}.
+     *
+     * @param sensitive quién puede administrar los scripts (RS-ADM-01, H-05): consola o admin verificado
      */
-    /** @param sensitive quién puede administrar los scripts (RS-ADM-01, H-05): consola o admin verificado */
     public static Optional<SamScripts> install(Logger log, Path keys, Map<String, String> config, Optional<Path> dataDir,
             java.util.function.Predicate<net.minecraft.commands.CommandSourceStack> sensitive) {
         if (config.getOrDefault(ENABLED, "true").strip().equalsIgnoreCase("false")) {
@@ -244,12 +245,12 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
         }
     }
 
-    /** Encola el evento para el próximo tick del hilo del servidor (nunca corre en el acto ni en otro hilo). */
     /** RF-AUTH-07e: avisa a los scripts que ese jugador borró su cuenta, para que borren lo suyo. */
     public void erase(MinecraftServer s, String nick, String uuid) {
         later(s, ScriptHost.Event.ERASE, new ScriptHost.Player(nick, uuid), Optional.empty());
     }
 
+    /** Encola el evento para el próximo tick del hilo del servidor (nunca corre en el acto ni en otro hilo). */
     private void later(MinecraftServer s, ScriptHost.Event event, ScriptHost.Player who, Optional<String> text) {
         s.tell(new net.minecraft.server.TickTask(s.getTickCount(), () -> host.fire(event, who, text)));
     }

@@ -48,6 +48,8 @@ dependencies {
 tasks.withType<JavaCompile>().configureEach {
     options.encoding = "UTF-8"
     options.release = 21
+    // H-19: las advertencias del compilador son errores, como en sam-common y sam-signer
+    options.compilerArgs.addAll(listOf("-Xlint:all", "-Xlint:-classfile", "-Xlint:-processing", "-Werror"))
 }
 
 // ===== Pruebas de punta a punta contra el servidor QA en ejecución (solo a pedido) =====

@@ -64,33 +64,33 @@ Las brechas marcadas **[operador]** tocan el equipo o el servidor del operador. 
 | Id | P | Brecha |
 |---|---|---|
 | H-16 | ✅ | **Cerrada 2026-11-08** (RF-CFG-11): `backup.ps1` arma el respaldo en una carpeta temporal solo del dueño y lo cifra con `sam-signer backup-seal` (AES-256-GCM por bloques, `SAM_BACKUP_KEY`), con `.sha256` al lado; `restore.ps1` verifica, descifra y extrae en una carpeta nueva. Restauración probada en un clon (archivos idénticos; con otra clave no abre). Los 2 zips viejos en claro se cifraron (verificados) y se borraron; el operador define `SAM_BACKUP_KEY` en su entorno
-| H-17 | P2 [operador] | El respaldo vive en el mismo disco que el servidor; no hay copia fuera del equipo |
+| H-17 | Riesgo aceptado (decisión del operador) | El respaldo vive en el mismo disco que el servidor; no hay copia fuera del equipo |
 
 ### Desarrollo seguro y cadena de suministro (A.8.8, A.8.25-8.29, A.8.32 / CC7.1, CC8.1)
 
 | Id | P | Brecha |
 |---|---|---|
-| H-18 | P2 | Sin escaneo de vulnerabilidades de dependencias ni SBOM (RN-38) |
-| H-19 | P2 | Sin CI: PIT y las pruebas de QA no son una barrera obligatoria, y sam-server y sam-client no tienen pruebas unitarias ni `-Werror` |
-| H-20 | P2 | Sin análisis estático (SpotBugs o Error Prone) |
-| H-21 | P2 | Releases sin checksums ni firma, y jars no reproducibles (RNF-06, RN-39) |
-| H-22 | P3 | Los ganchos `sam.dev.*` viajan en el jar de release (protegidos por `isDevelopmentEnvironment`). Conviene quitarlos al compilar |
+| H-18 | ✅ | **Cerrada 2026-11-08**: SBOM CycloneDX de los jars de release (syft) y escaneo de vulnerabilidades conocidas (grype, falla con severidad alta o crítica) en el CI; Dependabot semanal para Gradle y las acciones |
+| H-19 | ✅ | **Cerrada 2026-11-08**: GitHub Actions (`.github/workflows/ci.yml`) en cada push y PR: build con pruebas y JaCoCo, PIT al 100 % de sam-common y sam-signer. sam-server y sam-client compilan con `-Xlint:all -Werror` |
+| H-20 | ✅ | **Cerrada 2026-11-08**: CodeQL (`security-extended`) en cada push, PR y una vez por semana (`.github/workflows/codeql.yml`), además de `-Werror` en todos los módulos |
+| H-21 | ✅ | **Cerrada 2026-11-08**: jars reproducibles (sin fechas, orden fijo; verificado: dos builds limpios dan el mismo SHA-256), `releaseChecksums` arma `build/release` con `SHA256SUMS`, y `release.yml` publica en cada etiqueta los jars, SHA256SUMS, el SBOM y la procedencia firmada (attestation SLSA de GitHub) |
+| H-22 | Fuera del alcance (decisión del operador) | Los ganchos `sam.dev.*` viajan en el jar de release (protegidos por `isDevelopmentEnvironment`). Conviene quitarlos al compilar |
 
 ### Operación del servidor (A.8.9, A.8.31 / CC6.6, CC7.1) [operador]
 
 | Id | P | Brecha |
 |---|---|---|
 | H-23 | ✅ [operador] | **Cerrada 2026-11-08** con la decisión del operador: la passphrase y `identity.p12` de QA Server SAM quedaron solo para su usuario (`icacls`, sin herencia). Los archivos nuevos ya nacen así (H-12)
-| H-24 | P2 [operador] | RCON está activo, con la contraseña en claro en `server.properties`. Hoy escucha solo en 127.0.0.1 |
-| H-25 | P2 [operador] | Con WebSocket detrás de Cloudflare, `SAM_TCP_ENABLED=true` deja una entrada directa que se salta el CDN |
-| H-26 | P3 [operador] | QA y producción son el mismo servidor y el mismo directorio |
+| H-24 | Fuera del alcance (decisión del operador) | RCON está activo, con la contraseña en claro en `server.properties`. Hoy escucha solo en 127.0.0.1 |
+| H-25 | Fuera del alcance (decisión del operador) | Con WebSocket detrás de Cloudflare, `SAM_TCP_ENABLED=true` deja una entrada directa que se salta el CDN |
+| H-26 | Fuera del alcance (decisión del operador) | QA y producción son el mismo servidor y el mismo directorio |
 
 ### Políticas e incidentes (A.5.24-5.28, A.5.37 / CC7.3-7.5, CC2.3)
 
 | Id | P | Brecha |
 |---|---|---|
-| H-27 | P3 | Sin `SECURITY.md` (divulgación de vulnerabilidades), runbook de incidentes ni CHANGELOG |
-| H-28 | P3 | Los procedimientos (rotación de claves, restauración, alta de admins) están dispersos o no existen |
+| H-27 | Fuera del alcance (decisión del operador) | Sin `SECURITY.md` (divulgación de vulnerabilidades), runbook de incidentes ni CHANGELOG |
+| H-28 | Fuera del alcance (decisión del operador) | Los procedimientos (rotación de claves, restauración, alta de admins) están dispersos o no existen |
 
 ## 3. Plan
 
@@ -112,5 +112,5 @@ El estado de cada brecha se actualiza en este documento al cerrarla.
 | [operador] | Se pregunta una por una antes de cada cambio en el equipo o el servidor |
 | H-18 a H-21 (push) | Se sube a GitHub al terminar el hardening completo y se verifica que el workflow pase |
 | H-17 | **Riesgo aceptado por el operador**: los respaldos cifrados quedan en el mismo equipo |
-| H-24 | RCON se mantiene solo en 127.0.0.1, con una contraseña nueva larga y `server.properties` solo para el usuario del servidor |
+| H-22, H-24, H-27, H-28 | El operador dejó esta entrega en "solo lo funcional en el código" más CI y build: quedan fuera |
 | H-25, H-26 | **Fuera del alcance**: cómo se usa y se expone el servidor lo decide el operador |
