@@ -6,12 +6,15 @@ fabricApi = "0.116.17+1.21.1"
 loom = "1.19.3"
 # Minecraft 1.21.1 trae Netty 4.1.97 sin netty-codec-http: se embebe la misma versión
 netty = "4.1.97.Final"
+# netty-codec-http va embebido en sam-server: la última 4.1.x con los arreglos de seguridad (H-18). Solo usa clases del
+# núcleo 4.1.97 de Minecraft (auditado: lo único nuevo es ZstdDecoder en HttpContentDecompressor, que SAM no usa)
+nettyHttp = "4.1.140.Final"
 junit = "5.11.3"
 assertj = "3.26.3"
 jqwik = "1.9.1"
 # Sistema de archivos en memoria (POSIX y ACL) para probar permisos del .env sin depender del SO
 jimfs = "1.3.0"
-bouncycastle = "1.79"
+bouncycastle = "1.86"
 # Gson lo provee Minecraft en tiempo de ejecución; verificar la versión de 1.21.1 al montar Fabric
 gson = "2.10.1"
 # Gradle corre sobre JDK 25 (lo exige Loom 1.19): JaCoCo y PIT en versiones con soporte de Java 25
@@ -47,7 +50,7 @@ gson = { module = "com.google.code.gson:gson", version.ref = "gson" }
 minecraft = { module = "com.mojang:minecraft", version.ref = "minecraft" }
 fabric-loader = { module = "net.fabricmc:fabric-loader", version.ref = "fabricLoader" }
 fabric-api = { module = "net.fabricmc.fabric-api:fabric-api", version.ref = "fabricApi" }
-netty-codec-http = { module = "io.netty:netty-codec-http", version.ref = "netty" }
+netty-codec-http = { module = "io.netty:netty-codec-http", version.ref = "nettyHttp" }
 netty-codec = { module = "io.netty:netty-codec", version.ref = "netty" }
 netty-transport = { module = "io.netty:netty-transport", version.ref = "netty" }
 netty-buffer = { module = "io.netty:netty-buffer", version.ref = "netty" }

@@ -70,7 +70,7 @@ Las brechas marcadas **[operador]** tocan el equipo o el servidor del operador. 
 
 | Id | P | Brecha |
 |---|---|---|
-| H-18 | ✅ | **Cerrada 2026-11-08**: SBOM CycloneDX de los jars de release (syft) y escaneo de vulnerabilidades conocidas (grype, falla con severidad alta o crítica) en el CI; Dependabot semanal para Gradle y las acciones |
+| H-18 | ✅ | **Cerrada 2026-11-08**: SBOM CycloneDX de los jars de release (syft) y escaneo de vulnerabilidades conocidas (grype, falla con severidad alta o crítica) en el CI; Dependabot semanal para Gradle y las acciones. El primer escaneo encontró vulnerabilidades altas y críticas en netty-codec-http 4.1.97 y BouncyCastle 1.79 (embebidos): se actualizaron a 4.1.140 y 1.86; el codec-http nuevo se auditó contra el núcleo de Netty de Minecraft (solo agrega `ZstdDecoder` en `HttpContentDecompressor`, que SAM no usa) y el login por WebSocket se probó en un clon |
 | H-19 | ✅ | **Cerrada 2026-11-08**: GitHub Actions (`.github/workflows/ci.yml`) en cada push y PR: build con pruebas y JaCoCo, PIT al 100 % de sam-common y sam-signer. sam-server y sam-client compilan con `-Xlint:all -Werror` |
 | H-20 | ✅ | **Cerrada 2026-11-08**: CodeQL (`security-extended`) en cada push, PR y una vez por semana (`.github/workflows/codeql.yml`), además de `-Werror` en todos los módulos |
 | H-21 | ✅ | **Cerrada 2026-11-08**: jars reproducibles (sin fechas, orden fijo; verificado: dos builds limpios dan el mismo SHA-256), `releaseChecksums` arma `build/release` con `SHA256SUMS`, y `release.yml` publica en cada etiqueta los jars, SHA256SUMS, el SBOM y la procedencia firmada (attestation SLSA de GitHub) |

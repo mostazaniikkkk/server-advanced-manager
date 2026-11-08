@@ -40,8 +40,8 @@ dependencies {
     // ID token de Google (RS-OAUTH-05)
     implementation(libs.nimbus.jose.jwt)
     include(libs.nimbus.jose.jwt)
-    implementation(libs.netty.codec.http)
-    include(libs.netty.codec.http)
+    implementation(libs.netty.codec.http) { isTransitive = false }
+    include(libs.netty.codec.http) { isTransitive = false }
 }
 
 // Gradle corre sobre JDK 25 (Loom 1.19 lo exige); se compila para Java 21
@@ -62,7 +62,7 @@ dependencies {
     "qaTestImplementation"(libs.netty.codec)
     "qaTestImplementation"(libs.netty.transport)
     "qaTestImplementation"(libs.netty.handler)
-    "qaTestImplementation"(libs.netty.codec.http)
+    "qaTestImplementation"(libs.netty.codec.http) { isTransitive = false }
     "qaTestImplementation"(platform(libs.junit.bom))
     "qaTestImplementation"(libs.junit.jupiter)
     "qaTestImplementation"(libs.assertj)
