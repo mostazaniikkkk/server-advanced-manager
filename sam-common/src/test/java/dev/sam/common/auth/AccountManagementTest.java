@@ -146,4 +146,15 @@ class AccountManagementTest {
     private static Account guardadaCon(String key, String nick, String sub) {
         return new Account(key, nick, PasswordHash.create(k(1), RAPIDO, new SecureRandom()), key + "@example.com", Optional.of(sub));
     }
+
+    @Test
+    void elResetBorraLaCuentaYElJugadorVuelveARegistrarse() {
+        var servicio = servicio();
+        assertThat(servicio.reset("STEVE")).isTrue();
+        assertThat(servicio.state("steve")).isEqualTo(dev.sam.common.proto.auth.AccountState.NEW);
+        assertThat(cambios.getLast()).extracting(Account::key).containsExactly("alex");
+        var antes = cambios.size();
+        assertThat(servicio.reset("nadie")).isFalse();
+        assertThat(cambios).hasSize(antes);
+    }
 }

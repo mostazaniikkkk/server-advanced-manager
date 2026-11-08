@@ -303,6 +303,22 @@ public final class AccountService {
         return account != null && PasswordHash.verify(k, account.passwordHash());
     }
 
+    /**
+     * {@code sam auth reset} (RF-AUTH-07, RF-ADM-07): borra la cuenta entera; al volver, el jugador la crea de
+     * nuevo. Solo lo invoca la consola real.
+     *
+     * @return si existía
+     */
+    public synchronized boolean reset(String nick) {
+        var key = Nick.normalize(nick);
+        pending.remove(key);
+        if (accounts.remove(key) == null) {
+            return false;
+        }
+        onChange.accept(List.copyOf(accounts.values()));
+        return true;
+    }
+
     private void replace(Account account) {
         accounts.put(account.key(), account);
         onChange.accept(List.copyOf(accounts.values()));

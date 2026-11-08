@@ -104,6 +104,13 @@ public final class SamAuth {
         PayloadTypeRegistry.configurationS2C().register(OAUTH_URL, SamPayload.codec(OAUTH_URL, MAX_SERVER_MESSAGE));
 
         ServerConfigurationConnectionEvents.CONFIGURE.register(this::configure);
+        // sam auth reset <nick> (RF-AUTH-07, RF-ADM-07): solo la consola real; nadie más lo ve
+        net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback.EVENT.register((dispatcher, registry, environment) ->
+            dispatcher.register(net.minecraft.commands.Commands.literal("sam").then(net.minecraft.commands.Commands.literal("auth")
+                .requires(dev.sam.server.SamConsole::isConsole)
+                .then(net.minecraft.commands.Commands.literal("reset").then(net.minecraft.commands.Commands.argument("nick",
+                    com.mojang.brigadier.arguments.StringArgumentType.word()).executes(c -> reset(c.getSource(),
+                        com.mojang.brigadier.arguments.StringArgumentType.getString(c, "nick"))))))));
         ServerConfigurationConnectionEvents.DISCONNECT.register((handler, server) -> {
             flows.remove(handler);
             extended.remove(handler);
@@ -130,6 +137,26 @@ public final class SamAuth {
     /** Con cuentas e identidad cargadas, se atienden logins. */
     public void activate(Setup ready) {
         this.setup = ready;
+    }
+
+    private int reset(net.minecraft.commands.CommandSourceStack source, String nick) {
+        var ready = setup;
+        if (ready == null) {
+            source.sendFailure(Component.literal("El login de SAM está cerrado: no hay cuentas cargadas."));
+            return 0;
+        }
+        if (!ready.accounts().reset(nick)) {
+            source.sendFailure(Component.literal("No hay una cuenta " + nick + "."));
+            return 0;
+        }
+        forget(nick);
+        log.info("[auditoría] La consola reinició la cuenta de {} (se borró: contraseña, correo, 2FA y Google)", nick);
+        var online = source.getServer().getPlayerList().getPlayerByName(nick);
+        if (online != null) {
+            online.connection.disconnect(Component.literal("Tu cuenta se reinició. Vuelve a entrar para crearla de nuevo."));
+        }
+        source.sendSuccess(() -> Component.literal("Cuenta de " + nick + " borrada: al volver a entrar la crea de nuevo."), false);
+        return 1;
     }
 
     /** Si ese jugador completó el 2FA al entrar en esta sesión. */
