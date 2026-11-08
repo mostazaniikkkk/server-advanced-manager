@@ -48,6 +48,37 @@ class SecureFilesTest {
     }
 
     @Test
+    void enStreamingSinReemplazarYSoloParaElDueno() throws Exception {
+        try (var fs = Jimfs.newFileSystem(Configuration.unix().toBuilder().setAttributeViews("basic", "owner", "posix").build())) {
+            var archivo = fs.getPath("/respaldos/r.sambk");
+            SecureFiles.write(archivo, out -> out.write(new byte[] {4, 5, 6}), false);
+            assertThat(Files.readAllBytes(archivo)).containsExactly(4, 5, 6);
+            assertThat(java.nio.file.attribute.PosixFilePermissions.toString(Files.getPosixFilePermissions(archivo)))
+                .isEqualTo("rw-------");
+            assertThatThrownBy(() -> SecureFiles.write(archivo, out -> out.write(9), false))
+                .isInstanceOf(java.nio.file.FileAlreadyExistsException.class);
+            assertThat(Files.readAllBytes(archivo)).containsExactly(4, 5, 6);
+            SecureFiles.write(archivo, out -> out.write(9), true);
+            assertThat(Files.readAllBytes(archivo)).containsExactly(9);
+            try (var archivos = Files.list(archivo.getParent())) {
+                assertThat(archivos.map(p -> p.getFileName().toString())).containsExactly("r.sambk");
+            }
+        }
+    }
+
+    @Test
+    void sinReemplazarNoPisaEnElDiscoReal() throws Exception {
+        var archivo = dir.resolve("r.sambk");
+        Files.writeString(archivo, "original");
+        assertThatThrownBy(() -> SecureFiles.write(archivo, out -> out.write(1), false))
+            .isInstanceOf(java.nio.file.FileAlreadyExistsException.class);
+        assertThat(Files.readString(archivo)).isEqualTo("original");
+        try (var archivos = Files.list(dir)) {
+            assertThat(archivos.map(p -> p.getFileName().toString())).containsExactly("r.sambk");
+        }
+    }
+
+    @Test
     void reemplazaElContenidoSinDejarTemporales() throws Exception {
         var archivo = dir.resolve("secreto.json");
         Files.writeString(archivo, "viejo y más largo");

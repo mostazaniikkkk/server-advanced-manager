@@ -32,7 +32,7 @@ class SamSignerTest {
 
     private int run(String... args) {
         return SamSigner.run(args, new SamSigner.Env(dir, new PrintStream(salida, true, StandardCharsets.UTF_8),
-            prompt -> frases.isEmpty() ? null : frases.poll(), new SecureRandom(), 1000));
+            prompt -> frases.isEmpty() ? null : frases.poll(), new SecureRandom(), 1000, name -> null));
     }
 
     private String texto() {

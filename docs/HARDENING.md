@@ -63,7 +63,7 @@ Las brechas marcadas **[operador]** tocan el equipo o el servidor del operador. 
 
 | Id | P | Brecha |
 |---|---|---|
-| H-16 | P1 | **Respaldos sin cifrar** que incluyen `.env`, `accounts.json` e `identity.p12`. El área temporal no está restringida, no hay hash de integridad y nunca se probó una restauración |
+| H-16 | ✅ | **Cerrada 2026-11-08** (RF-CFG-11): `backup.ps1` arma el respaldo en una carpeta temporal solo del dueño y lo cifra con `sam-signer backup-seal` (AES-256-GCM por bloques, `SAM_BACKUP_KEY`), con `.sha256` al lado; `restore.ps1` verifica, descifra y extrae en una carpeta nueva. Restauración probada en un clon (archivos idénticos; con otra clave no abre). Pendiente del operador: definir `SAM_BACKUP_KEY` y decidir qué hacer con los 2 zips viejos en claro
 | H-17 | P2 [operador] | El respaldo vive en el mismo disco que el servidor; no hay copia fuera del equipo |
 
 ### Desarrollo seguro y cadena de suministro (A.8.8, A.8.25-8.29, A.8.32 / CC7.1, CC8.1)

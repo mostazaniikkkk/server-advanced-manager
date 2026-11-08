@@ -34,10 +34,14 @@ public final class SamSigner {
           sam-signer keygen <nombre>                      crea <nombre>.key (cifrada) y <nombre>.pub
           sam-signer sign <carpeta> --key <archivo.key>   firma la carpeta de un script (escribe signature.json)
           sam-signer verify <carpeta> --pub <archivo.pub> verifica la firma con una clave pública
+          sam-signer backup-key                           genera una clave para SAM_BACKUP_KEY
+          sam-signer backup-seal <entrada.zip> <salida>   cifra un respaldo con SAM_BACKUP_KEY (y escribe <salida>.sha256)
+          sam-signer backup-open <entrada> <salida.zip>   verifica el .sha256 y descifra un respaldo
         La passphrase se pide por consola (o en SAM_SIGNER_PASSPHRASE si no hay consola).""";
 
     /** Lo que la herramienta necesita del mundo exterior (inyectable en las pruebas). */
-    record Env(Path cwd, PrintStream out, Function<String, char[]> passphrase, SecureRandom random, int iterations) {
+    record Env(Path cwd, PrintStream out, Function<String, char[]> passphrase, SecureRandom random, int iterations,
+            Function<String, String> getenv) {
     }
 
     private SamSigner() {
@@ -47,7 +51,7 @@ public final class SamSigner {
         var console = System.console();
         var env = new Env(Path.of("").toAbsolutePath(), System.out,
             prompt -> prompt(console == null ? null : text -> console.readPassword("%s", text), System.getenv(), prompt), new SecureRandom(),
-            SigningKeyFile.ITERATIONS);
+            SigningKeyFile.ITERATIONS, System::getenv);
         System.exit(run(args, env));
     }
 
@@ -86,12 +90,32 @@ public final class SamSigner {
             if (args.length >= 4 && args.length % 2 == 0 && args[0].equals("verify")) {
                 return verify(args, env);
             }
+            if (args.length == 1 && args[0].equals("backup-key")) {
+                env.out().println(dev.sam.common.backup.BackupCrypto.ENV + "=" + dev.sam.common.backup.BackupCrypto.newKey(env.random()));
+                env.out().println("Defínela como variable de entorno de quien respalda y restaura (nunca en el .env) y guárdala "
+                    + "aparte del respaldo: sin ella no se puede restaurar.");
+                return 0;
+            }
+            if (args.length == 3 && args[0].equals("backup-seal")) {
+                BackupFiles.seal(env.cwd().resolve(args[1]), env.cwd().resolve(args[2]), backupKey(env), env.random());
+                env.out().println("Respaldo cifrado: " + env.cwd().resolve(args[2]) + " (y su .sha256)");
+                return 0;
+            }
+            if (args.length == 3 && args[0].equals("backup-open")) {
+                BackupFiles.open(env.cwd().resolve(args[1]), env.cwd().resolve(args[2]), backupKey(env));
+                env.out().println("Respaldo descifrado: " + env.cwd().resolve(args[2]));
+                return 0;
+            }
         } catch (IllegalArgumentException | IOException e) {
             env.out().println("Error: " + e.getMessage());
             return 1;
         }
         env.out().println(USAGE);
         return 2;
+    }
+
+    private static byte[] backupKey(Env env) {
+        return dev.sam.common.backup.BackupCrypto.parseKey(env.getenv().apply(dev.sam.common.backup.BackupCrypto.ENV));
     }
 
     private static void keygen(String name, Env env) throws IOException {

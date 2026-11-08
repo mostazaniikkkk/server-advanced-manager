@@ -16,13 +16,32 @@ public final class SecureFiles {
     private SecureFiles() {
     }
 
+    /** Lo que escribe el contenido en el temporal (para archivos grandes, sin tenerlos enteros en memoria). */
+    public interface Content {
+        void writeTo(java.io.OutputStream out) throws IOException;
+    }
+
     public static void write(Path file, byte[] content) throws IOException {
+        write(file, out -> out.write(content), true);
+    }
+
+    /**
+     * @param replace si puede reemplazar un archivo existente; si no, falla con
+     *     {@link java.nio.file.FileAlreadyExistsException}
+     */
+    public static void write(Path file, Content content, boolean replace) throws IOException {
+        // En Windows, ATOMIC_MOVE reemplaza aunque no se pida: se comprueba antes
+        if (!replace && Files.exists(file)) {
+            throw new java.nio.file.FileAlreadyExistsException(file.toString());
+        }
         var parent = file.toAbsolutePath().getParent();
         Files.createDirectories(parent);
         var tmp = Files.createTempFile(parent, ".sam", ".tmp");
         try {
             FilePermissions.restrictToOwner(tmp);
-            Files.write(tmp, content);
+            try (var out = Files.newOutputStream(tmp)) {
+                content.writeTo(out);
+            }
             Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } finally {
             Files.deleteIfExists(tmp);
