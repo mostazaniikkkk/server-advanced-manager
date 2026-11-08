@@ -92,6 +92,20 @@ public final class SamClient implements ClientModInitializer {
                     client.execute(() -> handler.sendCommand(each.strip()));
                 }
             }
+            // -Dsam.dev.closeScreenAfter=N: a los N s cierra la pantalla que haya (la de otro mod al entrar)
+            var close = Integer.getInteger("sam.dev.closeScreenAfter");
+            if (close != null) {
+                var closer = new Thread(() -> {
+                    try {
+                        Thread.sleep(close * 1000L);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                    client.execute(() -> client.setScreen(null));
+                }, "SAM dev close");
+                closer.setDaemon(true);
+                closer.start();
+            }
             var timer = new Thread(() -> {
                 try {
                     Thread.sleep(seconds * 1000L);

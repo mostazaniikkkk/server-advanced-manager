@@ -487,6 +487,21 @@ S → C  sam:account_result      status: enum { OK, FAILED, LOCKED }, detail: Op
                                (después de cada operación llega un account_info nuevo)
 ```
 
+**Imágenes de los jugadores** (capacidad `media`):
+
+```
+C → S  sam:media_up        upload: VarInt, index: VarInt, total: VarInt, data: bytes ≤ 32 KiB   (≤ 8 fragmentos, ≤ 256 KiB)
+S → C  sam:media_ready     upload: VarInt, media: bytes[16]
+C → S  sam:media_get       media: bytes[16]
+S → C  sam:media_down      media: bytes[16], index: VarInt, total: VarInt, data: bytes ≤ 32 KiB
+S → C  sam:media_failed    ref: bytes ≤ 16 (4 bytes big-endian = número de subida; 16 = id de imagen), reason: String ≤ 128
+```
+
+- **En el cliente**: la imagen se reduce a 512×512 como mucho y se re-codifica como PNG de hasta 256 KiB (achicando si hace falta). Al recibirla, se revisan la firma, el IHDR y los topes antes de decodificarla (RN-29).
+- **En el servidor**: las imágenes viven **en memoria**, con 5 por minuto por jugador, una hora de vida y 64 MiB en total (sale la más vieja primero). Cada jugador tiene como mucho 2 subidas a la vez. El id son 16 bytes aleatorios.
+- **Descargas**: solo el dueño o a quien él compartió puede descargar una imagen. Si no existe o no te la compartieron, la respuesta es la misma: `imagen no disponible`.
+- **Errores**: un fragmento fuera de orden o un `media_ready` o `media_down` que no se pidió es `SAM-P002`.
+
 `sam:lua_msg` une la parte de cliente y la de servidor de **un mismo script** (`"side": "both"`, capacidad `messages` en el manifest): el servidor solo acepta mensajes de un script que ese jugador aceptó y que corre en el servidor, y solo le envía a un jugador los de scripts que aceptó; el cliente solo acepta mensajes de un script que tiene cargado. Un mensaje para un script que no cumple eso se descarta (los scripts pueden recargarse en medio). Mal formado → `SAM-P001`. Tope en el servidor por jugador y script: 20 mensajes por segundo (ráfaga de 40); los que se pasan se descartan con un aviso en el log.
 
 Con el 2FA activo, `account_email`, `account_unlink` y `totp_disable` exigen el código además de `k`. Los fallos de contraseña o de código en play cuentan para el mismo tope que en el login (SAM-K004).
@@ -709,7 +724,7 @@ Reglas de `commands`: nombre `[a-z][a-z0-9_]{0,31}`; `permission` por defecto 0 
 | `keybinds` | `sam.key(id, tecla, fn)`: `fn()` al apretar la tecla en el mundo; devuelve si quedó asignada (si no, `fn` igual queda: funciona cuando el jugador le elige otra tecla) |
 | `menu` | `sam.menu.add(id, texto, fn[, {icon, order}])` agrega una entrada al botón de Opciones de cuenta del inventario (devuelve si reemplazó otra); `sam.menu.remove(id)` la quita (devuelve si existía). Con al menos una entrada, el botón es un menú desplegable: primero "Opciones de cuenta" y después las de los plugins por `order` (0..999, por defecto 100) y texto. Elegir una cierra el inventario y llama `fn()`, así el script puede abrir su pantalla. `id` `[a-z0-9_]{1,32}`, texto ≤ 32, `icon` un PNG del script; hasta 4 por script |
 | `links` | `sam.open_url(url)` muestra la confirmación de vanilla y solo abre el link si el jugador acepta (devuelve si se pudo pedir: en el mundo, sin pantalla o sobre la del propio script, nunca sobre una de SAM). Solo `http://` o `https://` con host y hasta 512 caracteres; otra cosa es un error del script. La pantalla del script vuelve después de la confirmación y no recibe `close` |
-| `media` | Imágenes (detalle en `docs/plugins/sam-mensajes.md` hasta que pase aquí al implementarse) |
+| `media` | En el cliente: `sam.media.capture(fn)` (lo que se ve en el juego, sin la interfaz) y `sam.media.pick(fn)` (un PNG o JPG elegido con el selector de archivos del sistema, de hasta 8 MiB) la suben y llaman `fn(id)` o `fn(nil, motivo)`; `sam.media.fetch(id, fn)` la descarga. Las tres devuelven si se pudo empezar: en el mundo, sin pantalla o sobre la del propio script. Como mucho 4 pedidos en curso por script. El widget `{type = "media", id, w, h}` (1..512, por defecto 128) la dibuja cuando está. En el servidor: `sam.media.share(id, de, para)` deja que `para` la descargue; solo vale si `de` es el dueño. El script nunca ve rutas ni bytes, solo ids de 32 hex. Topes y protocolo en 5.7 |
 | `game` | `sam.game.state()`: una copia de los datos de la partida de la lista cerrada de abajo (RS-LUA-10, RN-28) |
 
 Reglas de `hud`: `id` `[a-z0-9_]{1,32}`; texto plano ≤ 256 caracteres (sin códigos §); `anchor` uno de `top_left` (por defecto), `top`, `top_right`, `left`, `center`, `right`, `bottom_left`, `bottom`, `bottom_right`; `x` e `y` desplazamientos en píxeles de la GUI desde el ancla (−4096..4096, por defecto 0); `color` `0xRRGGBB` (por defecto blanco); como mucho 64 textos por script. El render **no** ejecuta Lua: dibuja cada frame lo último que los scripts dejaron. Si un script se suspende o falla, sus textos desaparecen. Un script con `hud` nunca dibuja sobre las pantallas de SAM (RS-LUA-07): el HUD solo se dibuja en el mundo, sin pantallas abiertas.

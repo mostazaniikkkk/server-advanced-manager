@@ -57,6 +57,7 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
     private final boolean devMode;
     private final ScriptHost host;
     private final ClientScriptsDelivery delivery;
+    private final MediaRelay media;
     /** El tope de mensajes por jugador y script ({@code nick/script}). */
     private final Map<String, dev.sam.common.lua.MessageBudget> budgets = new HashMap<>();
     private final Map<String, Integer> warned = new HashMap<>();
@@ -80,6 +81,7 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
         this.devMode = devMode;
         this.host = new ScriptHost(new Bridge(), limits);
         this.delivery = new ClientScriptsDelivery(log, onReject);
+        this.media = new MediaRelay(log);
     }
 
     /** La clave de la identidad del servidor, para firmar la keylist que va a los clientes (RS-SIG-05). */
@@ -115,6 +117,7 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
         scripts.dataDir = dataDir;
         scripts.delivery.install();
         scripts.installMessages();
+        scripts.media.install();
         ResourceManagerHelper.get(PackType.SERVER_DATA).registerReloadListener(scripts);
         ServerLifecycleEvents.SERVER_STARTING.register(s -> scripts.server = s);
         // Los comandos de los scripts entran al árbol cuando existe: al terminar de arrancar y tras cada /reload
@@ -516,6 +519,11 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
             var current = server;
             var target = current == null ? null : current.getPlayerList().getPlayerByName(player);
             return target == null ? Optional.empty() : me.lucko.fabric.api.permissions.v0.Options.get(target.createCommandSourceStack(), key);
+        }
+
+        @Override
+        public boolean shareMedia(String id, String from, String to) {
+            return media.share(id, from, to);
         }
 
         @Override

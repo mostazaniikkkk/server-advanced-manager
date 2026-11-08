@@ -90,6 +90,8 @@ final class ScriptScreen extends Screen {
                 graphics.drawString(font, l.text(), left + l.x(), top + l.y(), 0xFF000000 | l.color());
             } else if (widget instanceof ScreenSpec.Image i) {
                 runtime.drawImage(graphics, script, i.path(), i.png(), left + i.x(), top + i.y(), i.w(), i.h());
+            } else if (widget instanceof ScreenSpec.Media m) {
+                runtime.drawMedia(graphics, m.id(), left + m.x(), top + m.y(), m.w(), m.h());
             }
         }
         // La marca va al final y debajo del panel: nada del script la tapa (RS-LUA-09)

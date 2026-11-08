@@ -52,5 +52,5 @@ El id de una imagen son 16 bytes aleatorios, no un contador. Un `media_get` de a
 
 1. API `menu` (el menú desplegable en el inventario). **Hecho** (PROTOCOLO.md 8.3).
 2. API `links`. **Hecho** (PROTOCOLO.md 8.3).
-3. API `media`: protocolo, almacén en memoria con topes, captura, selector de archivos, widget.
+3. API `media`: protocolo, almacén en memoria con topes, captura, selector de archivos, widget. **Hecho** (PROTOCOLO.md 5.7 y 8.3). La captura y la descarga se probaron de punta a punta con dos jugadores. El selector de archivos no, porque es una ventana del sistema que no se puede automatizar.
 4. El plugin en Lua (servidor y cliente) y sus pruebas de punta a punta.

@@ -64,6 +64,7 @@ final class ClientScriptRuntime implements ScriptHost.ClientBridge {
     private final Logger log;
     private final Path keysFile;
     private final ScriptHost host;
+    private final MediaClient media;
     private boolean running;
     private final ArrayDeque<Waiting> waiting = new ArrayDeque<>();
     /** Código GLFW → tecla de script, y si estaba apretada en el tick anterior. */
@@ -79,9 +80,15 @@ final class ClientScriptRuntime implements ScriptHost.ClientBridge {
         this.log = log;
         this.keysFile = keysFile;
         this.host = ScriptHost.client(this, LIMITS);
+        this.media = new MediaClient(log, (script, request, id, error) -> {
+            if (running) {
+                host.mediaResult(script, request, id, error);
+            }
+        });
     }
 
     void install() {
+        media.install();
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> client.execute(this::start));
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> client.execute(this::stop));
         ClientTickEvents.END_CLIENT_TICK.register(this::tick);
@@ -178,6 +185,7 @@ final class ClientScriptRuntime implements ScriptHost.ClientBridge {
         down.clear();
         textures.values().stream().filter(t -> t != null).forEach(minecraft.getTextureManager()::release);
         textures.clear();
+        media.clear();
     }
 
     /** Con una pantalla de SAM abierta los scripts no reciben nada (RS-LUA-08). */
@@ -186,6 +194,7 @@ final class ClientScriptRuntime implements ScriptHost.ClientBridge {
     }
 
     private void tick(Minecraft minecraft) {
+        media.tick();
         if (!running || blocked()) {
             return;
         }
@@ -295,6 +304,44 @@ final class ClientScriptRuntime implements ScriptHost.ClientBridge {
             }
         });
         return true;
+    }
+
+    @Override
+    public boolean requestMedia(String script, int request, String source) {
+        var minecraft = Minecraft.getInstance();
+        // Como una pantalla de script: en el mundo, sin pantalla o sobre la del script; nunca sobre una de SAM
+        if (minecraft.level == null || minecraft.screen != null && !(minecraft.screen instanceof ScriptScreen)) {
+            return false;
+        }
+        minecraft.tell(() -> {
+            if (source.equals("capture")) {
+                media.capture(script, request);
+            } else {
+                media.pick(script, request);
+            }
+        });
+        return true;
+    }
+
+    @Override
+    public boolean fetchMedia(String script, int request, String id) {
+        if (Minecraft.getInstance().level == null) {
+            return false;
+        }
+        Minecraft.getInstance().tell(() -> media.fetch(script, request, id));
+        return true;
+    }
+
+    /** Dibuja una imagen de un jugador si ya está; si no, un recuadro. */
+    void drawMedia(GuiGraphics graphics, String id, int x, int y, int w, int h) {
+        var png = media.cached(id);
+        if (png.isPresent()) {
+            drawImage(graphics, "media", id, png.get(), x, y, w, h);
+        } else {
+            graphics.fill(x, y, x + w, y + h, 0xFF202028);
+            graphics.renderOutline(x, y, w, h, 0xFF4A4A55);
+            graphics.drawCenteredString(Minecraft.getInstance().font, "🖼", x + w / 2, y + h / 2 - 4, 0xFFA0A0A0);
+        }
     }
 
     @Override
@@ -460,7 +507,9 @@ final class ClientScriptRuntime implements ScriptHost.ClientBridge {
         if (!textures.containsKey(key)) {
             ResourceLocation location = null;
             try {
-                var image = NativeImage.read(png);
+                // Por InputStream (memoria del heap): read(byte[]) copia al MemoryStack de LWJGL, de 64 KB, y una
+                // imagen más grande tumba el juego con "Out of stack space"
+                var image = NativeImage.read(new java.io.ByteArrayInputStream(png));
                 location = ResourceLocation.fromNamespaceAndPath("sam", "script_image/" + nextTexture++);
                 Minecraft.getInstance().getTextureManager().register(location, new DynamicTexture(image));
             } catch (IOException | RuntimeException e) {
