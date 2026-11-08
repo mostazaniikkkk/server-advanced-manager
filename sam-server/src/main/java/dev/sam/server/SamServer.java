@@ -209,7 +209,7 @@ public final class SamServer implements DedicatedServerModInitializer {
     private static boolean startAuth(ServerId serverId, Map<String, String> config) {
         var file = FabricLoader.getInstance().getConfigDir().resolve("sam/accounts.json");
         try {
-            var minPassword = Integer.parseInt(config.getOrDefault(PASSWORD_MIN_LENGTH, "6").strip());
+            var minPassword = Integer.parseInt(config.getOrDefault(PASSWORD_MIN_LENGTH, "8").strip());
             // "Entrar con Google" solo con credenciales del operador (REQUERIMIENTOS 5.5); el secreto no se muestra
             var google = GoogleSignIn.fromConfig(config);
             var methods = google.isPresent() ? List.of(AuthMethod.PASSWORD, AuthMethod.GOOGLE) : List.of(AuthMethod.PASSWORD);

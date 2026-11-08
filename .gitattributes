@@ -10,3 +10,5 @@ gradlew text eol=lf
 *.ico binary
 *.jar binary
 *.zip binary
+*.gz binary
+*.sambk binary

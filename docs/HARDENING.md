@@ -38,7 +38,7 @@ Las brechas marcadas **[operador]** tocan el equipo o el servidor del operador. 
 | H-03 | ✅ | **Cerrada 2026-11-08** (`LoginThrottle`, RF-AUTH-06a): bloqueo exponencial por (cuenta, IP) que sobrevive a la reconexión, global de cuenta más suave, logins pendientes por IP y globales, cola de Argon2 de 64 (`SAM-K005`). Verificado en un clon: la segunda conexión se rechaza antes de Argon2. Pendiente: los fallos de contraseña en "Opciones de cuenta" (en juego) todavía usan su propio contador
 | H-04 | P2 | Sin caducidad de sesión ni reautenticación para comandos sensibles (`SAM_POLICY_*_SESSION_TTL`) |
 | H-05 | P2 | `/sam scripts reload` y similares solo piden OP 4, no el criterio de comando sensible (consola o admin verificado) |
-| H-06 | P2 | Contraseña mínima de 6 caracteres y sin lista de contraseñas comunes (RN-45) |
+| H-06 | ✅ | **Cerrada 2026-11-08** (RN-45): mínimo 8 por defecto (NIST SP 800-63B), el cliente rechaza las ~96.000 contraseñas más usadas (lista del NCSC vía SecLists) y las que contienen el nick, con el motivo a la vista. Verificado en pantalla
 | H-07 | P2 | Sin separación de funciones: un admin verificado puede darse `*` a sí mismo, y no existe `SAM_ADMINS` |
 
 ### Registro y monitoreo (A.8.15, A.8.16 / CC7.2-7.3)

@@ -371,7 +371,7 @@ SAM_AUTH_LOCKOUT_BASE=15m                   # se duplica en cada bloqueo repetid
 SAM_AUTH_PENDING_PER_IP=3
 SAM_AUTH_PENDING_GLOBAL=50
 SAM_AUTH_NOTIFY_FAILED_AFTER=10             # aviso por correo tras N fallos
-SAM_PASSWORD_MIN_LENGTH=6
+SAM_PASSWORD_MIN_LENGTH=8   # mínimo NIST SP 800-63B; el cliente además rechaza las ~96.000 contraseñas más comunes y las que contienen el nick (RN-45)
 SAM_NICK_VALIDATION=strict                  # off | strict | strict_similarity
 
 # ===== Proveedores OAuth =====

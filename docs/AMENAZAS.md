@@ -344,7 +344,7 @@ cliente                                     servidor
 | RN-42 | Huella visual del certificado del servidor en la AuthScreen + aviso de "servidor nunca visto" al pedir login | T-AUTH-09, T-NET-01 | P1 | 1 |
 | RN-43 | Recuperación desde un dispositivo desconocido: espera configurable (24 h) y aviso a los dispositivos de confianza, que pueden cancelarla | T-AUTH-10 | P1 | 1 |
 | RN-44 | Clave del dispositivo en el almacén seguro del sistema operativo, con respaldo en un archivo cifrado | T-AUTH-18 | P1 | 1 |
-| RN-45 | Rechazo de contraseñas comunes con una lista offline incluida (chequeo en el cliente) | T-AUTH-01 | P1 | 1 |
+| RN-45 | Rechazo de contraseñas comunes con una lista offline incluida (chequeo en el cliente). Implementado (H-06): la lista "100k most used passwords" del NCSC del Reino Unido (vía SecLists, MIT), normalizada a minúsculas (~96.000 de 4 a 64 caracteres), más el rechazo de contraseñas que contienen el nick | T-AUTH-01 | P1 | 1 |
 | RN-46 | Rechazo de peticiones WebSocket con cabecera `Origin` | T-WS-08 | P1 | 0 |
 
 ---

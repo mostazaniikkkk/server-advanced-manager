@@ -189,8 +189,18 @@ public final class AuthScreen extends Screen implements dev.sam.client.Protected
 
     // ===== Validación en vivo =====
 
+    /** RN-45 (H-06): la lista de contraseñas comunes se carga una vez por sesión del juego. */
+    private static dev.sam.common.auth.PasswordPolicy policy;
+
+    private java.util.Optional<String> passwordProblem() {
+        if (policy == null) {
+            policy = dev.sam.common.auth.PasswordPolicy.load();
+        }
+        return policy.check(password.getValue(), nick, hello.policy().minPassword());
+    }
+
     private boolean longEnough() {
-        return password.getValue().length() >= hello.policy().minPassword();
+        return passwordProblem().isEmpty();
     }
 
     private boolean matches() {
@@ -466,8 +476,10 @@ public final class AuthScreen extends Screen implements dev.sam.client.Protected
         } else if (registering) {
             var min = hello.policy().minPassword();
             var length = password.getValue().length();
-            check(graphics, right, fieldsTop, length == 0, longEnough(),
-                longEnough() ? "✔ " + length + " caracteres" : "mínimo " + min + " (" + length + ")");
+            var problem = passwordProblem();
+            check(graphics, right, fieldsTop, length == 0, problem.isEmpty(), problem.isEmpty() ? "✔ " + length + " caracteres"
+                : problem.get().equals(dev.sam.common.auth.PasswordPolicy.TOO_SHORT) ? "mínimo " + min + " (" + length + ")"
+                : "✖ " + problem.get());
         }
         if (registering) {
             graphics.drawString(font, "Repite la contraseña", x, fieldsTop + ROW, WHITE);
