@@ -197,11 +197,8 @@ public final class SamScripts implements SimpleSynchronousResourceReloadListener
             }
             var file = dataDir.orElseThrow().resolve(entry.getKey() + ".dat");
             try {
-                java.nio.file.Files.createDirectories(file.getParent());
-                var tmp = java.nio.file.Files.createTempFile(file.getParent(), entry.getKey(), ".tmp");
-                java.nio.file.Files.write(tmp, store.encode());
-                java.nio.file.Files.move(tmp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
-                    java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+                // RF-CFG-10: atómico y solo para el dueño
+                dev.sam.common.config.SecureFiles.write(file, store.encode());
                 store.saved();
             } catch (IOException e) {
                 log.error("No se pudieron guardar los datos del script {}: {}", entry.getKey(), e.getMessage());

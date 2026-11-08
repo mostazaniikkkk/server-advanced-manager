@@ -281,10 +281,8 @@ public final class SamClientNet {
     private static void save(PinStore updated) {
         pins = updated;
         try {
-            Files.createDirectories(pinsFile.getParent());
-            var temp = Files.createTempFile(pinsFile.getParent(), ".pins", ".tmp");
-            Files.writeString(temp, PinStoreJson.encode(updated));
-            Files.move(temp, pinsFile, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            // RF-CFG-10: atómico y solo para el dueño
+            dev.sam.common.config.SecureFiles.writeString(pinsFile, PinStoreJson.encode(updated));
         } catch (IOException e) {
             log.error("No se pudo guardar {}: {}", pinsFile, e.getMessage());
         }

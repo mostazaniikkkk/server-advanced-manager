@@ -1,0 +1,112 @@
+# Hardening de SAM: brechas frente a ISO 27001 y SOC 2
+
+Análisis del 2026-11-08 del código de SAM (0.3.0) y del servidor operado (QA Server SAM) frente a:
+
+- **ISO/IEC 27001:2022**, Anexo A;
+- **SOC 2**, Trust Services Criteria: Security (CC), Availability (A) y Confidentiality (C).
+
+SAM es un producto y no una organización, así que aquí solo entran los controles técnicos que el mod y su operación pueden cumplir. Los controles organizacionales (RR. HH., proveedores, gestión del SGSI) quedan fuera.
+
+Cada brecha tiene un id `H-xx`, una prioridad y el control que cubre:
+
+- **P1**: explotable hoy o requisito ya escrito que no está implementado. Va primero.
+- **P2**: endurece algo que ya funciona.
+- **P3**: proceso y documentación.
+
+Las brechas marcadas **[operador]** tocan el equipo o el servidor del operador. Se aplican solo con su decisión.
+
+## 1. Lo que ya cumple
+
+| Control | Evidencia |
+|---|---|
+| A.8.5 autenticación segura / CC6.1 | Argon2id en cliente (64 MiB, t=3) y servidor (19 MiB, t=2), comparación en tiempo constante, TOTP RFC 6238 con anti-replay, códigos de respaldo hasheados |
+| A.8.24 criptografía / CC6.7 | TLS 1.3 solo AEAD, ALPN `sam/1`, identidad Ed25519 con pinning y rotación firmada; TOTP sellado con AES-256-GCM |
+| A.5.33 / C1.1 secretos | `SAM_DATA_KEY` y `SAM_IDENTITY_PASSPHRASE` solo desde el entorno del proceso (el arranque falla si están en el `.env`); `.env` y `accounts.json` solo para el dueño, escritura atómica |
+| A.8.20-8.22 red / CC6.6 | Límites de conexiones sin clasificar (8 por IP, 256 en total), topes de tamaño por paquete, IP real solo desde proxies de confianza |
+| A.8.26-8.28 desarrollo seguro / CC8.1 | Sandbox Lua por lista blanca con batería de scripts maliciosos; capacidades por manifest exigidas en `ScriptHost`; scripts firmados con confirmación por consola |
+| A.8.8 / CC7.1 cadena de suministro (parcial) | Versiones fijas, `verification-metadata.xml` con SHA-256, wrapper con `distributionSha256Sum` |
+| A.8.29 pruebas | JaCoCo al 90 % y PIT al 100 % en sam-common y sam-signer, propiedades con jqwik |
+
+## 2. Brechas
+
+### Control de acceso y privilegios (A.5.15, A.5.18, A.8.2, A.8.5 / CC6.1-6.3)
+
+| Id | P | Brecha |
+|---|---|---|
+| H-01 | P1 | **Un OP conserva todo el poder de vanilla sin 2FA** (`/op`, `/ban`, `/gamemode`...). RF-ADM-04 y RS-ADM-01 están escritos pero no implementados |
+| H-02 | P1 | **Los admins no están obligados a activar 2FA** (`requireTotp`/`mustEnroll` fijos en `false`, RF-ADM-03) |
+| H-03 | P1 | **Sin bloqueo real de fuerza bruta**: solo 5 intentos por conexión, y reconectar reinicia el contador. Falta el bloqueo por cuenta y por IP con espera creciente (RF-AUTH-06). La cola de Argon2 no tiene tope (DoS) |
+| H-04 | P2 | Sin caducidad de sesión ni reautenticación para comandos sensibles (`SAM_POLICY_*_SESSION_TTL`) |
+| H-05 | P2 | `/sam scripts reload` y similares solo piden OP 4, no el criterio de comando sensible (consola o admin verificado) |
+| H-06 | P2 | Contraseña mínima de 6 caracteres y sin lista de contraseñas comunes (RN-45) |
+| H-07 | P2 | Sin separación de funciones: un admin verificado puede darse `*` a sí mismo, y no existe `SAM_ADMINS` |
+
+### Registro y monitoreo (A.8.15, A.8.16 / CC7.2-7.3)
+
+| Id | P | Brecha |
+|---|---|---|
+| H-08 | P1 | **Auditoría sin integridad**: las líneas `[auditoría]` van al log común de Minecraft, sin cadena de hash ni `/sam audit verify` (RF-AUTH-08) |
+| H-09 | P1 | La auditoría no registra cada intento fallido, la IP, el motivo, el valor anterior de un permiso ni los comandos sensibles de vanilla |
+| H-10 | ✅ | **Cerrada 2026-11-08** (van a `config/sam/secretos-sugeridos.txt`, solo del dueño). Antes: **secretos en el log**: los valores sugeridos de `SAM_IDENTITY_PASSPHRASE` y `SAM_DATA_KEY` se escriben en `latest.log` y en sus archivos rotados |
+| H-11 | P2 | `SAM_AUDIT_IP_RETENTION` está documentada pero no se usa: no hay retención |
+
+### Protección de datos (A.8.10-8.12, A.8.24, A.5.34 / C1.1-1.2)
+
+| Id | P | Brecha |
+|---|---|---|
+| H-12 | ✅ | **Cerrada 2026-11-08** (`SecureFiles`, RF-CFG-10). Antes: **permisos de archivos**: `identity.p12`, `permissions.json`, los `.dat` de scripts y el trust store se escriben sin restringirlos al dueño. En el cliente, `pins.json` y los consentimientos tampoco |
+| H-13 | P2 | El correo y el `sub` de Google se guardan en claro en `accounts.json`, aunque el `.env` dice que se cifran |
+| H-14 | P2 | `SAM_DATA_KEY` no se puede rotar: los blobs no llevan id de clave ni existe un comando de recifrado |
+| H-15 | P2 | Borrado incompleto: `sam auth reset` no borra los datos de scripts ni los permisos del jugador, y no hay borrado ni exportación por el propio jugador (RF-AUTH-07c) |
+
+### Continuidad y respaldo (A.8.13, A.5.30 / A1.2-1.3)
+
+| Id | P | Brecha |
+|---|---|---|
+| H-16 | P1 | **Respaldos sin cifrar** que incluyen `.env`, `accounts.json` e `identity.p12`. El área temporal no está restringida, no hay hash de integridad y nunca se probó una restauración |
+| H-17 | P2 [operador] | El respaldo vive en el mismo disco que el servidor; no hay copia fuera del equipo |
+
+### Desarrollo seguro y cadena de suministro (A.8.8, A.8.25-8.29, A.8.32 / CC7.1, CC8.1)
+
+| Id | P | Brecha |
+|---|---|---|
+| H-18 | P2 | Sin escaneo de vulnerabilidades de dependencias ni SBOM (RN-38) |
+| H-19 | P2 | Sin CI: PIT y las pruebas de QA no son una barrera obligatoria, y sam-server y sam-client no tienen pruebas unitarias ni `-Werror` |
+| H-20 | P2 | Sin análisis estático (SpotBugs o Error Prone) |
+| H-21 | P2 | Releases sin checksums ni firma, y jars no reproducibles (RNF-06, RN-39) |
+| H-22 | P3 | Los ganchos `sam.dev.*` viajan en el jar de release (protegidos por `isDevelopmentEnvironment`). Conviene quitarlos al compilar |
+
+### Operación del servidor (A.8.9, A.8.31 / CC6.6, CC7.1) [operador]
+
+| Id | P | Brecha |
+|---|---|---|
+| H-23 | P1 [operador] | El archivo de la passphrase de identidad e `identity.p12` son legibles por cualquier usuario del equipo (ACL heredada) |
+| H-24 | P2 [operador] | RCON está activo, con la contraseña en claro en `server.properties`. Hoy escucha solo en 127.0.0.1 |
+| H-25 | P2 [operador] | Con WebSocket detrás de Cloudflare, `SAM_TCP_ENABLED=true` deja una entrada directa que se salta el CDN |
+| H-26 | P3 [operador] | QA y producción son el mismo servidor y el mismo directorio |
+
+### Políticas e incidentes (A.5.24-5.28, A.5.37 / CC7.3-7.5, CC2.3)
+
+| Id | P | Brecha |
+|---|---|---|
+| H-27 | P3 | Sin `SECURITY.md` (divulgación de vulnerabilidades), runbook de incidentes ni CHANGELOG |
+| H-28 | P3 | Los procedimientos (rotación de claves, restauración, alta de admins) están dispersos o no existen |
+
+## 3. Plan
+
+En el orden de las prioridades, un ciclo TDD por brecha de código, con PIT al 100 %:
+
+1. **P1 de código**: H-10, H-12, H-03, H-01 y H-02, H-08 y H-09, H-16 (el script de respaldo).
+2. **P1 del operador**: H-23, con la decisión del operador.
+3. **P2** de código, y después **P3**.
+
+El estado de cada brecha se actualiza en este documento al cerrarla.
+
+## 4. Decisiones del operador (2026-11-08)
+
+| Tema | Decisión |
+|---|---|
+| H-01, H-02 | **Sin 2FA no es OP**: el nivel de OP solo vale después de completar el 2FA en esa sesión; antes, el admin juega como jugador normal. Los admins deben activar 2FA al entrar |
+| H-16 | **Respaldo cifrado con clave propia**: AES-256-GCM con una clave de respaldo que llega como variable de entorno, hash de integridad y un comando de restauración probado |
+| H-18 a H-21 | **GitHub Actions**: build, pruebas, PIT, escaneo de dependencias, SBOM y checksums de release |
+| [operador] | Se pregunta una por una antes de cada cambio en el equipo o el servidor |

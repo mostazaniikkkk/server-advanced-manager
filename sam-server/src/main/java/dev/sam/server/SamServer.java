@@ -177,10 +177,8 @@ public final class SamServer implements DedicatedServerModInitializer {
                 ready.created() ? "generada" : "cargada", identity.serverId().hex(), fingerprint.phrase());
         } else if (outcome instanceof Disabled disabled) {
             LOGGER.error(disabled.reason());
-            // RF-CFG-08: el valor sugerido se muestra una sola vez y no se guarda
-            disabled.suggestedPassphrase().ifPresent(value -> LOGGER.warn(
-                "Valor sugerido para {} (defínelo como variable de entorno del proceso, nunca en el .env): {}",
-                ServerIdentityBootstrap.PASSPHRASE_ENV, value));
+            // RF-CFG-08 / H-10: el valor sugerido va a un archivo solo del dueño, nunca al log
+            disabled.suggestedPassphrase().ifPresent(value -> suggest(ServerIdentityBootstrap.PASSPHRASE_ENV, value));
         }
     }
 
@@ -215,6 +213,18 @@ public final class SamServer implements DedicatedServerModInitializer {
         }
     }
 
+    /** RF-CFG-08 / H-10: escribe un valor sugerido en {@code config/sam/secretos-sugeridos.txt}; el log solo dice dónde. */
+    private static void suggest(String name, String value) {
+        var file = FabricLoader.getInstance().getConfigDir().resolve("sam/secretos-sugeridos.txt");
+        try {
+            dev.sam.common.config.SuggestedSecrets.save(file, name, value);
+            LOGGER.warn("Falta {}: hay un valor sugerido en {} (solo lo puede leer el usuario del servidor). Defínelo como "
+                + "variable de entorno del proceso, nunca en el .env, y borra ese archivo.", name, file);
+        } catch (java.io.IOException e) {
+            LOGGER.error("Falta {} y no se pudo escribir el valor sugerido en {}: {}", name, file, e.getMessage());
+        }
+    }
+
     /**
      * La bóveda del 2FA (RS-AUTH-03) con {@code SAM_DATA_KEY}, que solo puede venir del entorno del proceso
      * (el .env la rechaza, RF-CFG-08). Sin ella el 2FA no se puede activar; el login sigue.
@@ -222,9 +232,9 @@ public final class SamServer implements DedicatedServerModInitializer {
     private static java.util.Optional<dev.sam.common.totp.TotpVault> dataVault(Map<String, String> config) {
         var value = config.get(dev.sam.common.totp.DataKey.ENV);
         if (value == null || value.isBlank()) {
-            LOGGER.warn("2FA no disponible: falta {} en el entorno del proceso. Valor sugerido (defínelo como variable de "
-                + "entorno, nunca en el .env; guárdalo: sin él no se pueden verificar los 2FA activos): {}",
-                dev.sam.common.totp.DataKey.ENV, dev.sam.common.totp.DataKey.suggest(new SecureRandom()));
+            LOGGER.warn("2FA no disponible: falta {} en el entorno del proceso (guárdalo: sin él no se pueden verificar "
+                + "los 2FA activos)", dev.sam.common.totp.DataKey.ENV);
+            suggest(dev.sam.common.totp.DataKey.ENV, dev.sam.common.totp.DataKey.suggest(new SecureRandom()));
             return java.util.Optional.empty();
         }
         try {

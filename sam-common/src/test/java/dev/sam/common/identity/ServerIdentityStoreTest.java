@@ -35,6 +35,20 @@ class ServerIdentityStoreTest {
     }
 
     @Test
+    void laIdentidadSeGuardaSoloParaElDueno() throws Exception {
+        try (var posix = com.google.common.jimfs.Jimfs.newFileSystem(com.google.common.jimfs.Configuration.unix().toBuilder()
+                .setAttributeViews("basic", "owner", "posix").build())) {
+            var archivo = posix.getPath("/srv/config/sam/keys/identity.p12");
+            ServerIdentityStore.loadOrCreate(archivo, CLAVE.clone(), new SecureRandom(), AHORA);
+            assertThat(java.nio.file.attribute.PosixFilePermissions.toString(Files.getPosixFilePermissions(archivo)))
+                .isEqualTo("rw-------");
+            try (var archivos = Files.list(archivo.getParent())) {
+                assertThat(archivos.map(p -> p.getFileName().toString())).containsExactly("identity.p12");
+            }
+        }
+    }
+
+    @Test
     void lasSiguientesVecesCargaLaMismaIdentidad() {
         var archivo = dir.resolve("identity.p12");
         var primera = ServerIdentityStore.loadOrCreate(archivo, CLAVE.clone(), new SecureRandom(), AHORA).identity();

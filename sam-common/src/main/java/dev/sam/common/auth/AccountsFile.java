@@ -83,16 +83,7 @@ public final class AccountsFile {
 
     /** Escribe en un temporal al lado y lo mueve encima: nunca queda un archivo a medias. */
     public static void save(Path file, List<Account> accounts) throws IOException {
-        var dir = file.toAbsolutePath().getParent();
-        Files.createDirectories(dir);
-        var temp = Files.createTempFile(dir, ".accounts", ".tmp");
-        try {
-            FilePermissions.restrictToOwner(temp);
-            Files.writeString(temp, encode(accounts));
-            Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-        } finally {
-            Files.deleteIfExists(temp);
-        }
+        dev.sam.common.config.SecureFiles.writeString(file, encode(accounts));
     }
 
     private static List<Account> read(String json) throws IOException {

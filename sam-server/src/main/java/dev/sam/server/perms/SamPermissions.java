@@ -198,10 +198,8 @@ public final class SamPermissions {
     }
 
     private void save(PermissionSet set) throws IOException {
-        Files.createDirectories(file.getParent());
-        var tmp = Files.createTempFile(file.getParent(), "permissions", ".tmp");
-        Files.writeString(tmp, set.toJson());
-        Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        // RF-CFG-10: atómico y solo para el dueño
+        dev.sam.common.config.SecureFiles.writeString(file, set.toJson());
     }
 
     // ===== /sam perms (docs/PERMISOS.md, sección 4) =====

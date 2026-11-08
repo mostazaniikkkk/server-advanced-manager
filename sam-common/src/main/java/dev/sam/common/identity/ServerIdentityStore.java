@@ -83,16 +83,11 @@ public final class ServerIdentityStore {
             var keyStore = KeyStore.getInstance("PKCS12");
             keyStore.load(null, null);
             keyStore.setKeyEntry(ALIAS, identity.privateKey(), passphrase, new Certificate[] {identity.certificate()});
-            // Escritura atómica: un corte a mitad nunca deja una identidad a medias en su lugar
-            var temp = Files.createTempFile(dir, ".identity-", ".tmp");
-            try {
-                try (var out = Files.newOutputStream(temp)) {
-                    keyStore.store(out, passphrase);
-                }
-                Files.move(temp, file, StandardCopyOption.ATOMIC_MOVE);
-            } finally {
-                Files.deleteIfExists(temp);
-            }
+            // Escritura atómica y solo para el dueño desde que nace (RF-CFG-10): un corte a mitad nunca deja
+            // una identidad a medias en su lugar. Solo se llama cuando no existe (loadOrCreate)
+            var out = new java.io.ByteArrayOutputStream();
+            keyStore.store(out, passphrase);
+            dev.sam.common.config.SecureFiles.write(file, out.toByteArray());
         } catch (IOException e) {
             throw new UncheckedIOException("No se pudo guardar la identidad del servidor en " + file, e);
         } catch (GeneralSecurityException e) {

@@ -84,7 +84,9 @@ public record TrustStore(List<KeyList.Entry> entries, List<Pending> pending, Lis
         if (store.pending().stream().noneMatch(p -> p.keyId().equals(keyId))) {
             return false;
         }
-        Files.writeString(keys.resolve(CONFIRMED), keyId.hex() + "\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        var file = keys.resolve(CONFIRMED);
+        var before = Files.exists(file) ? Files.readString(file) : "";
+        dev.sam.common.config.SecureFiles.writeString(file, before + keyId.hex() + "\n");
         return true;
     }
 

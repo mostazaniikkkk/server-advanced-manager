@@ -73,6 +73,17 @@ class ScriptConsentsTest {
     }
 
     @Test
+    void elArchivoEsSoloDelDueno() throws Exception {
+        try (var posix = com.google.common.jimfs.Jimfs.newFileSystem(com.google.common.jimfs.Configuration.unix().toBuilder()
+                .setAttributeViews("basic", "owner", "posix").build())) {
+            var archivo = posix.getPath("/cliente/config/sam-client/script-consents.properties");
+            new ScriptConsents(archivo).remember(PIN_A, List.of("homes:" + SHA_1));
+            assertThat(java.nio.file.attribute.PosixFilePermissions.toString(Files.getPosixFilePermissions(archivo)))
+                .isEqualTo("rw-------");
+        }
+    }
+
+    @Test
     void elArchivoEsLegibleYOrdenado() throws Exception {
         new ScriptConsents(file()).remember(PIN_A, List.of("mensajes:" + SHA_2, "homes:" + SHA_1));
         var text = Files.readString(file(), StandardCharsets.UTF_8);

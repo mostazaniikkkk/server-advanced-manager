@@ -45,6 +45,24 @@ class TrustStoreTest {
     }
 
     @Test
+    void laConfirmacionSeGuardaSoloParaElDuenoYConservaLasAnteriores() throws Exception {
+        try (var posix = Jimfs.newFileSystem(Configuration.unix().toBuilder().setAttributeViews("basic", "owner", "posix").build())) {
+            var dir = posix.getPath("/server/config/sam/keys");
+            Files.createDirectories(dir.resolve("trusted"));
+            for (var par : java.util.List.of(java.util.Map.entry("a.pub", K1), java.util.Map.entry("b.pub", K2))) {
+                Files.writeString(dir.resolve("trusted").resolve(par.getKey()),
+                    Base64.getEncoder().encodeToString(par.getValue().publicKeyRaw()) + "\n");
+            }
+            assertThat(TrustStore.confirm(dir, PUB1.keyId())).isTrue();
+            assertThat(TrustStore.confirm(dir, PUB2.keyId())).isTrue();
+            var confirmados = dir.resolve("confirmed.txt");
+            assertThat(Files.readString(confirmados)).isEqualTo(PUB1.keyId().hex() + "\n" + PUB2.keyId().hex() + "\n");
+            assertThat(java.nio.file.attribute.PosixFilePermissions.toString(Files.getPosixFilePermissions(confirmados)))
+                .isEqualTo("rw-------");
+        }
+    }
+
+    @Test
     void unaClaveNuevaQuedaPendienteHastaConfirmarla() throws Exception {
         clave("steve.pub", K1);
         var store = TrustStore.load(keys);

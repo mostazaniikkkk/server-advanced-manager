@@ -84,10 +84,7 @@ public final class ScriptConsents {
         var text = new StringBuilder("# Scripts que aceptaste en cada servidor (RS-LUA-05). Borra una línea para que vuelva a preguntar.\n");
         servers.forEach((pin, entries) -> text.append(pin).append('=').append(String.join(",", entries)).append('\n'));
         try {
-            Files.createDirectories(file.getParent());
-            var tmp = Files.createTempFile(file.getParent(), "consents", ".tmp");
-            Files.writeString(tmp, text, StandardCharsets.UTF_8);
-            Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            dev.sam.common.config.SecureFiles.writeString(file, text.toString());
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
