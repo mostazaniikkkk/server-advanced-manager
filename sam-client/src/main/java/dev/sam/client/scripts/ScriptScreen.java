@@ -24,6 +24,8 @@ final class ScriptScreen extends Screen {
     private int left;
     private int top;
     private boolean closedSent;
+    /** Otra pantalla la tapa un momento (la confirmación de un link) y después vuelve: no es un cierre. */
+    private boolean covered;
 
     ScriptScreen(ClientScriptRuntime runtime, String script, ScreenSpec spec) {
         super(Component.literal(spec.title()));
@@ -36,8 +38,13 @@ final class ScriptScreen extends Screen {
         return script;
     }
 
+    void coveredByChild() {
+        covered = true;
+    }
+
     @Override
     protected void init() {
+        covered = false;
         left = (width - spec.width()) / 2;
         top = Math.max(16, (height - spec.height()) / 2);
         for (var widget : spec.widgets()) {
@@ -97,7 +104,7 @@ final class ScriptScreen extends Screen {
 
     @Override
     public void removed() {
-        if (!closedSent) {
+        if (!closedSent && !covered) {
             closedSent = true;
             runtime.screenEvent(script, ScreenSpec.Event.closed());
         }

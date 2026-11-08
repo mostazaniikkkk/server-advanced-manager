@@ -47,6 +47,7 @@ public final class ScriptHost {
     private static final int MAX_TAB = 200;
     private static final int MAX_KEYS = 8;
     private static final int MAX_MENU = 4;
+    private static final int MAX_URL = 512;
     private static final int MAX_MENU_LABEL = 32;
     private static final int MAX_TITLE = 64;
     private static final int MAX_SHORT = 64;
@@ -171,6 +172,11 @@ public final class ScriptHost {
 
         /** @return si la tecla quedó asignada (el jugador la puede cambiar; no se pisa una acción del juego) */
         default boolean bindKey(String script, String id, String key) {
+            return false;
+        }
+
+        /** Pide confirmar y abrir un link (capacidad {@code links}); nunca lo abre sin confirmación. @return si se pidió */
+        default boolean openUrl(String script, String url) {
             return false;
         }
 
@@ -590,6 +596,10 @@ public final class ScriptHost {
                 RegisteredFunction.of("remove", (s, id) -> valueOf(loaded.menu.remove(string(id)) != null))});
             sam.rawset("menu", menu);
         }
+        if (client && loaded.manifest.has("links")) {
+            RegisteredFunction.bind(sam, new RegisteredFunction[] {
+                RegisteredFunction.of("open_url", (s, url) -> valueOf(ui.openUrl(loaded.id(), link(string(url)))))});
+        }
         if (client && loaded.manifest.has("keybinds")) {
             RegisteredFunction.bind(sam, new RegisteredFunction[] {RegisteredFunction.ofV("key", (s, args) -> key(loaded, args))});
         }
@@ -838,6 +848,20 @@ public final class ScriptHost {
         if (client) {
             ui.closeScreen(loaded.id());
         }
+    }
+
+    /** Un link {@code http(s)} con host, de hasta 512 caracteres y sin espacios ni caracteres de control. */
+    private static String link(String url) throws LuaError {
+        try {
+            var uri = new java.net.URI(url);
+            var scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+            if (url.length() <= MAX_URL && (scheme.equals("http") || scheme.equals("https")) && uri.getHost() != null) {
+                return url;
+            }
+        } catch (java.net.URISyntaxException e) {
+            // cae al error de abajo
+        }
+        throw new LuaError("link inválido: solo http(s)://, con host y hasta " + MAX_URL + " caracteres");
     }
 
     /** {@code sam.menu.add(id, texto, fn[, {icon, order}])}: devuelve si reemplazó una entrada. */

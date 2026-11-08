@@ -298,6 +298,30 @@ final class ClientScriptRuntime implements ScriptHost.ClientBridge {
     }
 
     @Override
+    public boolean openUrl(String script, String url) {
+        var minecraft = Minecraft.getInstance();
+        // Igual que una pantalla de script: en el mundo, sin pantalla o sobre la de un script; nunca sobre una de SAM
+        if (minecraft.level == null || minecraft.screen != null && !(minecraft.screen instanceof ScriptScreen)) {
+            return false;
+        }
+        minecraft.tell(() -> {
+            var previous = minecraft.screen;
+            if (previous instanceof ScriptScreen own) {
+                // Vuelve a ella después: para el script su pantalla no se cerró
+                own.coveredByChild();
+            }
+            log.info("El script {} pide abrir {}", script, url);
+            minecraft.setScreen(new net.minecraft.client.gui.screens.ConfirmLinkScreen(accepted -> {
+                if (accepted) {
+                    net.minecraft.Util.getPlatform().openUri(url);
+                }
+                minecraft.setScreen(previous);
+            }, url, true));
+        });
+        return true;
+    }
+
+    @Override
     public boolean closeScreen(String script) {
         var minecraft = Minecraft.getInstance();
         if (minecraft.screen instanceof ScriptScreen screen && screen.script().equals(script)) {
